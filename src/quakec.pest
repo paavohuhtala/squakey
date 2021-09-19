@@ -1,0 +1,29 @@
+WHITESPACE = _{ " " | "\t" | newline }
+COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+newline = ${ "\r\n" | "\n" }
+
+type_entity = { "entity" }
+type_float = { "float" }
+type_vector = { "vector" }
+type_string = { "string" }
+type_void = { "void" }
+
+builtin_type = { type_entity | type_float | type_vector | type_string | type_void }
+
+identifier_1st = _{ ('a' .. 'z') | ('A' .. 'Z') | "_" }
+identifier_rest = _{ '0' .. '9' | identifier_1st }
+identifier = { identifier_1st ~ identifier_rest* }
+argument = { builtin_type ~ identifier }
+argument_list = {("(" ~ ")") | "(" ~ argument ~ ( "," ~ argument )* ~ ")" }
+function_type = { builtin_type ~ argument_list }
+any_type = _{ function_type | builtin_type }
+
+end_of_declaration = @{ ";" ~ newline? }
+field_declaration = { "." ~ any_type ~ identifier ~ end_of_declaration }
+
+declaration = _{ newline | field_declaration }
+
+program = { declaration* }
+
+main = { SOI ~ program ~ EOI }
