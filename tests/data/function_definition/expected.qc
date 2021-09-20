@@ -1,4 +1,5 @@
 
-void() hello_world = {
+void() hello_world =
+{
   message = "hello, world!";
 };

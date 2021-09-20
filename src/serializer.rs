@@ -1,17 +1,28 @@
 use std::fmt;
 
-use crate::ast::*;
+use crate::{
+    ast::*,
+    config::{BraceStyle, FormatSettings},
+};
 
 struct ProgramWriter {
     buffer: String,
     indent: usize,
+    config: FormatSettings,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum BlockSpacing {
+    None,
+    SpaceBeforeOpen,
 }
 
 impl ProgramWriter {
-    pub fn new() -> ProgramWriter {
+    pub fn new(config: Option<FormatSettings>) -> ProgramWriter {
         ProgramWriter {
             buffer: String::new(),
             indent: 0,
+            config: config.unwrap_or_default(),
         }
     }
 
@@ -41,6 +52,32 @@ impl ProgramWriter {
 
     pub fn write(&mut self, value: &str) {
         self.buffer.push_str(value);
+    }
+
+    pub fn start_block(&mut self, spacing: BlockSpacing) {
+        match self.config.brace {
+            BraceStyle::EndOfLine => {
+                match spacing {
+                    BlockSpacing::None => self.write("{"),
+                    BlockSpacing::SpaceBeforeOpen => self.write(" {"),
+                }
+                self.end_line();
+                self.indent();
+            }
+            BraceStyle::NextLine => {
+                self.end_line();
+                self.start_line();
+                self.write("{");
+                self.end_line();
+                self.indent();
+            }
+        }
+    }
+
+    pub fn end_block(&mut self) {
+        self.dedent();
+        self.start_line();
+        self.write("}");
     }
 }
 
@@ -110,16 +147,13 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
 fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
     match statement {
         Statement::Block(block) => {
-            writer.start_line();
-            writer.write("{");
-            writer.end_line();
-            writer.indent();
+            writer.start_block(BlockSpacing::None);
 
             for statement in block {
                 format_statement(writer, statement);
             }
 
-            writer.dedent();
+            writer.end_block();
         }
         Statement::Expression(_) => todo!(),
         Statement::Assignment { lvalue, rvalue } => {
@@ -154,16 +188,14 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             writer.write(name);
 
             if let Some(body) = body {
-                writer.write(" = {");
-                writer.end_line();
-                writer.indent();
+                writer.write(" =");
+                writer.start_block(BlockSpacing::SpaceBeforeOpen);
 
                 for statement in body {
                     format_statement(writer, statement);
                 }
 
-                writer.dedent();
-                writer.write("}");
+                writer.end_block();
             }
 
             writer.write(";");
@@ -172,8 +204,8 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
     }
 }
 
-pub fn format_program(declarations: Vec<Declaration>) -> String {
-    let mut writer = ProgramWriter::new();
+pub fn format_program(declarations: Vec<Declaration>, config: Option<FormatSettings>) -> String {
+    let mut writer = ProgramWriter::new(config);
 
     let mut consecutive_newlines = 0;
 

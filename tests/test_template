@@ -5,7 +5,7 @@ fn %NAME%() {
     let expected_output = include_str!(r#"%PATH%\expected.qc"#);
 
     let parsed = parse_program(input);
-    let formatted = format_program(parsed);
+    let formatted = format_program(parsed, None);
 
     assert_eq!(expected_output, formatted);
 }

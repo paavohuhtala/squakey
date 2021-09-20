@@ -6,7 +6,7 @@ fn main() {
 
     println!("{:?}", program);
 
-    let formatted = format_program(program);
+    let formatted = format_program(program, None);
 
     println!("{}", formatted);
 }
