@@ -1,4 +1,4 @@
-use std::fmt::{self};
+use std::fmt;
 
 use crate::ast::*;
 
@@ -92,6 +92,47 @@ fn format_type(writer: &mut ProgramWriter, ty: &Type) {
     }
 }
 
+fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
+    match expr {
+        Expression::String(literal) => {
+            writer.write("\"");
+            writer.write(literal);
+            writer.write("\"");
+        }
+        Expression::Number(_) => todo!(),
+        Expression::Vector(_, _, _) => todo!(),
+        Expression::Identifier(identifier) => {
+            writer.write(identifier);
+        }
+    }
+}
+
+fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
+    match statement {
+        Statement::Block(block) => {
+            writer.start_line();
+            writer.write("{");
+            writer.end_line();
+            writer.indent();
+
+            for statement in block {
+                format_statement(writer, statement);
+            }
+
+            writer.dedent();
+        }
+        Statement::Expression(_) => todo!(),
+        Statement::Assignment { lvalue, rvalue } => {
+            writer.start_line();
+            format_expression(writer, lvalue);
+            writer.write(" = ");
+            format_expression(writer, rvalue);
+            writer.write(";");
+            writer.end_line();
+        }
+    }
+}
+
 fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
     match decl {
         Declaration::Newline => {
@@ -106,6 +147,28 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             writer.write(";");
             writer.end_line();
         }
+        Declaration::Function { name, ty, body } => {
+            writer.start_line();
+            format_type(writer, ty);
+            writer.write(" ");
+            writer.write(name);
+
+            if let Some(body) = body {
+                writer.write(" = {");
+                writer.end_line();
+                writer.indent();
+
+                for statement in body {
+                    format_statement(writer, statement);
+                }
+
+                writer.dedent();
+                writer.write("}");
+            }
+
+            writer.write(";");
+            writer.end_line();
+        }
     }
 }
 
@@ -115,16 +178,14 @@ pub fn format_program(declarations: Vec<Declaration>) -> String {
     let mut consecutive_newlines = 0;
 
     for declaration in declarations.iter() {
-        println!("{:?}", declaration);
         match declaration {
             Declaration::Newline if consecutive_newlines >= 2 => {
-                println!("{} newlines, skipping", consecutive_newlines);
                 continue;
             }
             Declaration::Newline => {
                 consecutive_newlines += 1;
             }
-            Declaration::Field { .. } => {
+            _ => {
                 consecutive_newlines = 1;
             }
         }

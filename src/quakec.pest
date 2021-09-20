@@ -1,7 +1,8 @@
-WHITESPACE = _{ " " | "\t" | newline }
+WHITESPACE = _{ " " | "\t" | silent_newline }
 COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 
-newline = ${ "\r\n" | "\n" }
+silent_newline = _{ "\r\n" | "\n" }
+newline = ${ ("\r\n" | "\n") }
 
 type_entity = { "entity" }
 type_float = { "float" }
@@ -13,7 +14,34 @@ builtin_type = { type_entity | type_float | type_vector | type_string | type_voi
 
 identifier_1st = _{ ('a' .. 'z') | ('A' .. 'Z') | "_" }
 identifier_rest = _{ '0' .. '9' | identifier_1st }
-identifier = { identifier_1st ~ identifier_rest* }
+identifier = @{ identifier_1st ~ identifier_rest* }
+
+// https://pest.rs/book/examples/json.html
+string_literal = ${ "\"" ~ string_content ~ "\"" }
+string_content = @{ string_char* }
+string_char = {
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
+number_literal = @{
+    "-"?
+    ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+    ~ ("." ~ ASCII_DIGIT*)?
+// TODO: Looks like FTEQCC doesn't support scientific notation?
+//    ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
+
+vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" }
+
+expression = {
+  string_literal |
+  number_literal |
+  vector_literal |
+  identifier |
+  "(" ~ expression ~ ")"
+}
+
 argument = { builtin_type ~ identifier }
 argument_list = {("(" ~ ")") | "(" ~ argument ~ ( "," ~ argument )* ~ ")" }
 function_type = { builtin_type ~ argument_list }
@@ -21,9 +49,17 @@ any_type = _{ function_type | builtin_type }
 
 end_of_declaration = @{ ";" ~ newline? }
 field_declaration = { "." ~ any_type ~ identifier ~ end_of_declaration }
+// variable_declaration = { any_type ~ identifier }
 
-declaration = _{ newline | field_declaration }
+function_definition = { "=" ~ "{" ~ statement* ~ "}" }
+function_declaration = { function_type ~ identifier ~ function_definition? ~ end_of_declaration }
 
-program = { declaration* }
+assignment = { expression ~ "=" ~ expression ~ end_of_declaration }
 
-main = { SOI ~ program ~ EOI }
+expression_statement = { expression ~ end_of_declaration}
+statement = { declaration | assignment | expression_statement }
+
+declaration = !{ WHITESPACE* ~ field_declaration | function_declaration }
+
+program = _{ (newline | declaration)* }
+main = ${ SOI ~ program ~ EOI }
