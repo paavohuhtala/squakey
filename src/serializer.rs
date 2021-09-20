@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
 use crate::{
     ast::*,
@@ -129,6 +129,86 @@ fn format_type(writer: &mut ProgramWriter, ty: &Type) {
     }
 }
 
+fn format_infix<'a>(
+    writer: &mut ProgramWriter,
+    op: InfixOp,
+    lhs: &Expression<'a>,
+    rhs: &Expression<'a>,
+) {
+    // https://stackoverflow.com/a/14184425
+    let use_parenthesis_l = match lhs {
+        Expression::Infix(left_op, _) => {
+            if *left_op == op && op.is_associative() {
+                false
+            } else if left_op.precedence() > op.precedence() {
+                false
+            } else if left_op.is_left_associative()
+                && op.is_left_associative()
+                && left_op.precedence() == op.precedence()
+            {
+                false
+            } else {
+                true
+            }
+        }
+        _ => false,
+    };
+
+    if use_parenthesis_l {
+        writer.write("(");
+    }
+
+    format_expression(writer, lhs);
+
+    if use_parenthesis_l {
+        writer.write(")");
+    }
+
+    let op_str = match op {
+        InfixOp::Add => " + ",
+        InfixOp::Sub => " - ",
+        InfixOp::Mul => " * ",
+        InfixOp::Div => " / ",
+        InfixOp::And => " && ",
+        InfixOp::Or => " || ",
+        InfixOp::BitwiseAnd => " & ",
+        InfixOp::BitwiseOr => " | ",
+        InfixOp::BitwiseXor => " ^ ",
+        InfixOp::Equals => " == ",
+        InfixOp::NotEquals => " != ",
+    };
+
+    writer.write(op_str);
+
+    let use_parenthesis_r = match rhs {
+        Expression::Infix(right_op, _) => {
+            if *right_op == op && op.is_associative() {
+                false
+            } else if right_op.precedence() > op.precedence() {
+                false
+            } else if right_op.is_right_associative()
+                && right_op.is_right_associative()
+                && right_op.precedence() == op.precedence()
+            {
+                false
+            } else {
+                true
+            }
+        }
+        _ => false,
+    };
+
+    if use_parenthesis_r {
+        writer.write("(");
+    }
+
+    format_expression(writer, rhs);
+
+    if use_parenthesis_r {
+        writer.write(")");
+    }
+}
+
 fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
     match expr {
         Expression::String(literal) => {
@@ -136,10 +216,49 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
             writer.write(literal);
             writer.write("\"");
         }
-        Expression::Number(_) => todo!(),
+        Expression::Number(number) => {
+            write!(writer, "{}", number).unwrap();
+        }
         Expression::Vector(_, _, _) => todo!(),
         Expression::Identifier(identifier) => {
             writer.write(identifier);
+        }
+        Expression::Prefix(op, inner) => {
+            // Simplify chained prefix ops
+            match (op, inner.as_ref()) {
+                (PrefixOp::Neg, Expression::Prefix(PrefixOp::Neg, inner))
+                | (PrefixOp::Not, Expression::Prefix(PrefixOp::Not, inner)) => {
+                    return format_expression(writer, inner);
+                }
+                (PrefixOp::Neg, Expression::Number(number)) if *number < 0.0 => {
+                    return format_expression(writer, &Expression::Number(-number))
+                }
+                _ => {}
+            }
+
+            let op_str = match op {
+                PrefixOp::Not => "!",
+                PrefixOp::Neg => "-",
+            };
+
+            writer.write(op_str);
+
+            match inner.as_ref() {
+                Expression::Infix(_, _) => {
+                    writer.write("(");
+                    format_expression(writer, inner);
+                    writer.write(")");
+                }
+                _ => {
+                    format_expression(writer, inner);
+                }
+            }
+        }
+        Expression::Infix(op, boxed) => {
+            let left = &boxed.0;
+            let right = &boxed.1;
+
+            format_infix(writer, *op, left, right);
         }
     }
 }
@@ -181,21 +300,32 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             writer.write(";");
             writer.end_line();
         }
-        Declaration::Function { name, ty, body } => {
+        Declaration::Binding {
+            name,
+            ty,
+            initializer,
+        } => {
             writer.start_line();
             format_type(writer, ty);
             writer.write(" ");
             writer.write(name);
 
-            if let Some(body) = body {
-                writer.write(" =");
-                writer.start_block(BlockSpacing::SpaceBeforeOpen);
+            match initializer {
+                None => {}
+                Some(BindingInitializer::Block(block)) => {
+                    writer.write(" =");
+                    writer.start_block(BlockSpacing::SpaceBeforeOpen);
 
-                for statement in body {
-                    format_statement(writer, statement);
+                    for statement in block {
+                        format_statement(writer, statement);
+                    }
+
+                    writer.end_block();
                 }
-
-                writer.end_block();
+                Some(BindingInitializer::Expr(expr)) => {
+                    writer.write(" = ");
+                    format_expression(writer, expr)
+                }
             }
 
             writer.write(";");

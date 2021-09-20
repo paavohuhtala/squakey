@@ -2,8 +2,11 @@ use core::panic;
 
 use pest::{
     iterators::{Pair, Pairs},
+    prec_climber::{Assoc, Operator, PrecClimber},
     Parser,
 };
+
+use once_cell::{self, sync::Lazy};
 
 use crate::ast::*;
 
@@ -110,21 +113,76 @@ fn parse_type(pair: Pair<Rule>) -> Type {
     }
 }
 
-fn parse_expression(pair: Pair<Rule>) -> Expression {
-    let expression = pair.assert_and_unwrap_only_child(Rule::expression);
-    match expression.as_rule() {
+fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
+    match pair.as_rule() {
         Rule::string_literal => {
-            let literal = expression
+            let literal = pair
                 .assert_and_unwrap_only_child(Rule::string_literal)
                 .as_str();
             Expression::String(literal)
         }
         Rule::identifier => {
-            let name = expression.as_str();
+            let name = pair.as_str();
             Expression::Identifier(name)
         }
-        _ => todo!(),
+        Rule::number_literal => {
+            let number = pair.as_str().parse().unwrap();
+            Expression::Number(number)
+        }
+        Rule::expression => parse_expression(pair),
+        Rule::prefixed => {
+            let mut children = pair.assert_and_unwrap(Rule::prefixed);
+            let op = children.next().unwrap();
+
+            let prefix_op = match op.as_rule() {
+                Rule::neg => PrefixOp::Neg,
+                Rule::not => PrefixOp::Not,
+                otherwise => panic!("expected prefix op, found {:?}", otherwise),
+            };
+
+            let inner = children.next().unwrap();
+            let inner = parse_primary_expr(inner);
+
+            Expression::Prefix(prefix_op, Box::new(inner))
+        }
+        otherwise => {
+            panic!("expected any primary expression, found {:?}", otherwise);
+        }
     }
+}
+
+fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
+    let pairs = pair.assert_and_unwrap(Rule::expression);
+
+    let infix = |lhs: Expression<'a>, op: Pair<Rule>, rhs: Expression<'a>| {
+        let op = match op.as_rule() {
+            Rule::add => InfixOp::Add,
+            Rule::sub => InfixOp::Sub,
+            Rule::mul => InfixOp::Mul,
+            Rule::div => InfixOp::Div,
+            Rule::and => InfixOp::And,
+            Rule::or => InfixOp::Or,
+            Rule::bitwise_and => InfixOp::BitwiseAnd,
+            Rule::bitwise_or => InfixOp::BitwiseOr,
+            Rule::bitwise_xor => InfixOp::BitwiseXor,
+            Rule::equals => InfixOp::Equals,
+            Rule::not_equals => InfixOp::NotEquals,
+            _ => unreachable!(),
+        };
+
+        Expression::Infix(op, Box::new((lhs, rhs)))
+    };
+
+    static CLIMBER: Lazy<PrecClimber<Rule>> = Lazy::new(|| {
+        PrecClimber::new(vec![
+            Operator::new(Rule::add, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
+            Operator::new(Rule::mul, Assoc::Left) | Operator::new(Rule::div, Assoc::Left),
+            Operator::new(Rule::and, Assoc::Left),
+            Operator::new(Rule::or, Assoc::Left),
+        ])
+    });
+
+    CLIMBER.climb(pairs, parse_primary_expr, infix)
 }
 
 fn parse_statement(pair: Pair<Rule>) -> Statement {
@@ -160,7 +218,7 @@ fn parse_declaration(pair: Pair<Rule>) -> Declaration {
 
             Declaration::Field { name, ty }
         }
-        Rule::function_declaration => {
+        Rule::binding => {
             let mut inner = inner.into_inner();
 
             let ty = inner.next().unwrap();
@@ -171,31 +229,36 @@ fn parse_declaration(pair: Pair<Rule>) -> Declaration {
 
             let next = inner.next();
 
-            match next {
-                Some(pair) if pair.as_rule() == Rule::function_definition => {
-                    let mut body = Vec::new();
+            let initializer = match next {
+                Some(initializer) if initializer.as_rule() == Rule::initializer => {
+                    let child = initializer.assert_and_unwrap_only_child(Rule::initializer);
+                    match child.as_rule() {
+                        Rule::block => {
+                            let inner = child.into_inner();
+                            let mut body = Vec::new();
 
-                    let inner = pair.into_inner();
-                    println!("function body :D");
-                    for statement in inner {
-                        let statement = parse_statement(statement);
-                        body.push(statement);
-                    }
+                            for statement in inner {
+                                let statement = parse_statement(statement);
+                                body.push(statement);
+                            }
 
-                    Declaration::Function {
-                        name,
-                        ty,
-                        body: Some(body),
+                            Some(BindingInitializer::Block(body))
+                        }
+                        Rule::expression => {
+                            let value = parse_expression(child);
+                            Some(BindingInitializer::Expr(value))
+                        }
+                        otherwise => panic!("unexpected rule {:?}", otherwise),
                     }
                 }
-                Some(pair) if pair.as_rule() == Rule::end_of_declaration => {
-                    return Declaration::Function {
-                        name,
-                        ty,
-                        body: None,
-                    }
-                }
+                Some(pair) if pair.as_rule() == Rule::end_of_declaration => None,
                 otherwise => panic!("unexpected rule {:?}", otherwise),
+            };
+
+            Declaration::Binding {
+                name,
+                ty,
+                initializer,
             }
         }
         otherwise => panic!("expected declaration, got {:?}", otherwise),

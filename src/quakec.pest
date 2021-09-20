@@ -34,11 +34,35 @@ number_literal = @{
 
 vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" }
 
-expression = {
+// https://github.com/segeljakt/ast/blob/master/examples/calc.pest
+
+expression = { primary ~ (infix ~ primary)* }
+
+infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor }
+add = { "+" }
+sub = { "-" }
+mul = { "*" }
+div = { "/" }
+and = { "&&" }
+or = { "||" }
+bitwise_and = { "&" }
+bitwise_or = { "|" }
+bitwise_xor = { "^" }
+equals = { "==" }
+not_equals = { "!=" }
+
+prefix = _{ neg | not }
+neg = { "-" }
+not = { "!" }
+
+prefixed = { prefix ~ primary }
+
+primary = _{
   string_literal |
   number_literal |
   vector_literal |
   identifier |
+  prefixed |
   "(" ~ expression ~ ")"
 }
 
@@ -49,17 +73,17 @@ any_type = _{ function_type | builtin_type }
 
 end_of_declaration = @{ ";" ~ newline? }
 field_declaration = { "." ~ any_type ~ identifier ~ end_of_declaration }
-// variable_declaration = { any_type ~ identifier }
 
-function_definition = { "=" ~ "{" ~ statement* ~ "}" }
-function_declaration = { function_type ~ identifier ~ function_definition? ~ end_of_declaration }
+block = { "{" ~ statement* ~ "}" }
+initializer = { "=" ~ ( block | expression ) }
+binding = { any_type ~ identifier ~ initializer? ~ end_of_declaration }
 
 assignment = { expression ~ "=" ~ expression ~ end_of_declaration }
 
 expression_statement = { expression ~ end_of_declaration}
 statement = { declaration | assignment | expression_statement }
 
-declaration = !{ WHITESPACE* ~ field_declaration | function_declaration }
+declaration = !{ WHITESPACE* ~ field_declaration | binding }
 
 program = _{ (newline | declaration)* }
 main = ${ SOI ~ program ~ EOI }
