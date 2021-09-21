@@ -60,16 +60,8 @@ impl InfixOp {
 
     pub fn is_associative(self) -> bool {
         match self {
-            InfixOp::Add
-            | InfixOp::Mul
-            | InfixOp::And
-            | InfixOp::Or
-            | InfixOp::BitwiseAnd
-            | InfixOp::BitwiseOr
-            | InfixOp::BitwiseXor
-            | InfixOp::Equals
-            | InfixOp::NotEquals => true,
             InfixOp::Sub | InfixOp::Div => false,
+            _ => true,
         }
     }
 
