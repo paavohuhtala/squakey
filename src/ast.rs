@@ -83,6 +83,7 @@ pub enum Expression<'a> {
     Identifier(&'a str),
     Infix(InfixOp, Box<(Expression<'a>, Expression<'a>)>),
     Prefix(PrefixOp, Box<Expression<'a>>),
+    Call(Box<Expression<'a>>, Vec<Expression<'a>>),
 }
 
 impl<'a> Expression<'a> {
@@ -102,6 +103,7 @@ pub enum Statement<'a> {
         lvalue: Expression<'a>,
         rvalue: Expression<'a>,
     },
+    Decl(Declaration<'a>),
 }
 
 #[derive(Debug)]

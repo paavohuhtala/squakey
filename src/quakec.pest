@@ -36,7 +36,7 @@ vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" 
 
 // https://github.com/segeljakt/ast/blob/master/examples/calc.pest
 
-expression = { primary ~ (infix ~ primary)* }
+expression = { field_access | call | primary ~ (infix ~ primary)*  }
 
 infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor }
 add = { "+" }
@@ -56,6 +56,10 @@ neg = { "-" }
 not = { "!" }
 
 prefixed = { prefix ~ primary }
+
+call_arguments = { "(" ~ expression ~ ( "," ~ expression )* ~ ")" }
+call = { primary ~ ( "(" ~ ")" | call_arguments ) }
+field_access = { primary ~ "." ~ identifier }
 
 primary = _{
   string_literal |

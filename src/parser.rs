@@ -145,6 +145,28 @@ fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
 
             Expression::Prefix(prefix_op, Box::new(inner))
         }
+        Rule::call => {
+            let mut inner = pair.into_inner();
+            let target = inner.next().unwrap();
+            let target = parse_primary_expr(target);
+
+            let args = match inner.next() {
+                None => Vec::new(),
+                Some(args) => {
+                    let args = args.assert_and_unwrap(Rule::call_arguments);
+
+                    let mut arguments = Vec::new();
+
+                    for arg in args {
+                        arguments.push(parse_expression(arg));
+                    }
+
+                    arguments
+                }
+            };
+
+            Expression::Call(Box::new(target), args)
+        }
         otherwise => {
             panic!("expected any primary expression, found {:?}", otherwise);
         }
@@ -198,6 +220,11 @@ fn parse_statement(pair: Pair<Rule>) -> Statement {
                 lvalue: left,
                 rvalue: right,
             }
+        }
+        Rule::declaration => Statement::Decl(parse_declaration(statement)),
+        Rule::expression_statement => {
+            let inner = statement.into_inner().next().unwrap();
+            Statement::Expression(parse_expression(inner))
         }
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
     }

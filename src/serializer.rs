@@ -260,6 +260,28 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
 
             format_infix(writer, *op, left, right);
         }
+        Expression::Call(target, args) => {
+            match target.as_ref() {
+                Expression::Infix(_, _) => {
+                    writer.write("(");
+                    format_expression(writer, target);
+                    writer.write(")");
+                }
+                _ => {
+                    format_expression(writer, target);
+                }
+            }
+
+            writer.write("(");
+            for (i, argument) in args.iter().enumerate() {
+                if i > 0 {
+                    writer.write(", ");
+                }
+
+                format_expression(writer, argument);
+            }
+            writer.write(")");
+        }
     }
 }
 
@@ -274,7 +296,12 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
 
             writer.end_block();
         }
-        Statement::Expression(_) => todo!(),
+        Statement::Expression(expr) => {
+            writer.start_line();
+            format_expression(writer, expr);
+            writer.write(";");
+            writer.end_line()
+        }
         Statement::Assignment { lvalue, rvalue } => {
             writer.start_line();
             format_expression(writer, lvalue);
@@ -283,6 +310,7 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
             writer.write(";");
             writer.end_line();
         }
+        Statement::Decl(decl) => format_declaration(writer, decl),
     }
 }
 
