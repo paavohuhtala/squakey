@@ -35,7 +35,6 @@ where
     }
 
     fn assert_and_unwrap_only_child(self, rule: Rule) -> Pair<'a, Rule> {
-        println!("Unwrapping {:?} with {:?}", self, rule);
         let mut unwrapped = self.assert_and_unwrap(rule);
         let first = unwrapped
             .next()
@@ -113,6 +112,18 @@ fn parse_type(pair: Pair<Rule>) -> Type {
     }
 }
 
+fn parse_call_arguments<'a>(pair: Pair<'a, Rule>) -> Vec<Expression<'a>> {
+    let args = pair.assert_and_unwrap(Rule::call_arguments);
+
+    let mut arguments = Vec::new();
+
+    for arg in args {
+        arguments.push(parse_expression(arg));
+    }
+
+    arguments
+}
+
 fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
     match pair.as_rule() {
         Rule::string_literal => {
@@ -141,36 +152,54 @@ fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
             };
 
             let inner = children.next().unwrap();
-            let inner = parse_primary_expr(inner);
+            let inner = parse_unary_expression(inner);
 
             Expression::Prefix(prefix_op, Box::new(inner))
         }
-        Rule::call => {
-            let mut inner = pair.into_inner();
-            let target = inner.next().unwrap();
-            let target = parse_primary_expr(target);
+        Rule::identifier_call => {
+            let mut children = pair.assert_and_unwrap(Rule::identifier_call);
+            let target = children.next().unwrap();
+            let identifier = parse_identifier(target);
 
-            let args = match inner.next() {
+            let args = match children.next() {
                 None => Vec::new(),
-                Some(args) => {
-                    let args = args.assert_and_unwrap(Rule::call_arguments);
-
-                    let mut arguments = Vec::new();
-
-                    for arg in args {
-                        arguments.push(parse_expression(arg));
-                    }
-
-                    arguments
-                }
+                Some(args) => parse_call_arguments(args),
             };
 
-            Expression::Call(Box::new(target), args)
+            Expression::Call(Box::new(Expression::Identifier(identifier)), args)
         }
         otherwise => {
             panic!("expected any primary expression, found {:?}", otherwise);
         }
     }
+}
+
+fn parse_unary_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
+    let mut inner = pair.assert_and_unwrap(Rule::unary_expression);
+
+    let primary = inner.next().unwrap();
+    let primary = parse_primary_expr(primary);
+
+    let mut expr = primary;
+
+    while let Some(op) = inner.next() {
+        let mut pairs = op.assert_and_unwrap(Rule::selector);
+
+        let identifier = pairs.next().unwrap();
+        let identifier = parse_identifier(identifier);
+
+        expr = Expression::FieldAccess(Box::new(expr), identifier);
+
+        match pairs.next() {
+            Some(rule) => {
+                let args = parse_call_arguments(rule);
+                expr = Expression::Call(Box::new(expr), args);
+            }
+            None => {}
+        }
+    }
+
+    expr
 }
 
 fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
@@ -204,7 +233,7 @@ fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
         ])
     });
 
-    CLIMBER.climb(pairs, parse_primary_expr, infix)
+    CLIMBER.climb(pairs, parse_unary_expression, infix)
 }
 
 fn parse_statement(pair: Pair<Rule>) -> Statement {
@@ -226,6 +255,7 @@ fn parse_statement(pair: Pair<Rule>) -> Statement {
             let inner = statement.into_inner().next().unwrap();
             Statement::Expression(parse_expression(inner))
         }
+        Rule::newline => Statement::Newline,
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
     }
 }
@@ -264,8 +294,15 @@ fn parse_declaration(pair: Pair<Rule>) -> Declaration {
                             let inner = child.into_inner();
                             let mut body = Vec::new();
 
-                            for statement in inner {
-                                let statement = parse_statement(statement);
+                            for statement_or_newline in inner {
+                                let statement = match statement_or_newline.as_rule() {
+                                    Rule::newline => Statement::Newline,
+                                    Rule::statement => parse_statement(statement_or_newline),
+                                    otherwise => panic!(
+                                        "Expected statement or newline, found {:?}",
+                                        otherwise
+                                    ),
+                                };
                                 body.push(statement);
                             }
 

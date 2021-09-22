@@ -84,6 +84,7 @@ pub enum Expression<'a> {
     Infix(InfixOp, Box<(Expression<'a>, Expression<'a>)>),
     Prefix(PrefixOp, Box<Expression<'a>>),
     Call(Box<Expression<'a>>, Vec<Expression<'a>>),
+    FieldAccess(Box<Expression<'a>>, &'a str),
 }
 
 impl<'a> Expression<'a> {
@@ -104,6 +105,7 @@ pub enum Statement<'a> {
         rvalue: Expression<'a>,
     },
     Decl(Declaration<'a>),
+    Newline,
 }
 
 #[derive(Debug)]

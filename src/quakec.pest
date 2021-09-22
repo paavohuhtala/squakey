@@ -1,3 +1,10 @@
+
+// Inspired by:
+// - The Pest book
+//  https://pest.rs/book/examples/json.html
+// - This Peg grammar for Java 1.7
+//  https://github.com/pointlander/peg/blob/0d618c19cd3c991caccb57451d418b16a6ea2595/grammars/java/java_1_7.peg
+
 WHITESPACE = _{ " " | "\t" | silent_newline }
 COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 
@@ -16,7 +23,6 @@ identifier_1st = _{ ('a' .. 'z') | ('A' .. 'Z') | "_" }
 identifier_rest = _{ '0' .. '9' | identifier_1st }
 identifier = @{ identifier_1st ~ identifier_rest* }
 
-// https://pest.rs/book/examples/json.html
 string_literal = ${ "\"" ~ string_content ~ "\"" }
 string_content = @{ string_char* }
 string_char = {
@@ -36,8 +42,6 @@ vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" 
 
 // https://github.com/segeljakt/ast/blob/master/examples/calc.pest
 
-expression = { field_access | call | primary ~ (infix ~ primary)*  }
-
 infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor }
 add = { "+" }
 sub = { "-" }
@@ -55,19 +59,24 @@ prefix = _{ neg | not }
 neg = { "-" }
 not = { "!" }
 
-prefixed = { prefix ~ primary }
+prefixed = { prefix ~ unary_expression }
 
-call_arguments = { "(" ~ expression ~ ( "," ~ expression )* ~ ")" }
-call = { primary ~ ( "(" ~ ")" | call_arguments ) }
-field_access = { primary ~ "." ~ identifier }
+expression = { unary_expression ~ (infix ~ unary_expression)* }
+
+call_arguments = { "(" ~ (expression ~ ( "," ~ expression )*)? ~ ")" }
+identifier_call = { identifier ~ call_arguments } 
+
+unary_expression = { primary ~ selector* }
+selector = { "." ~ identifier ~ call_arguments? }
 
 primary = _{
+  "(" ~ expression ~ ")" |
   string_literal |
   number_literal |
   vector_literal |
+  identifier_call |
   identifier |
-  prefixed |
-  "(" ~ expression ~ ")"
+  prefixed
 }
 
 argument = { builtin_type ~ identifier }
@@ -78,16 +87,16 @@ any_type = _{ function_type | builtin_type }
 end_of_declaration = @{ ";" ~ newline? }
 field_declaration = { "." ~ any_type ~ identifier ~ end_of_declaration }
 
-block = { "{" ~ statement* ~ "}" }
+block = ${ "{" ~ silent_newline? ~ (newline | statement)* ~ WHITESPACE* ~ "}" }
 initializer = { "=" ~ ( block | expression ) }
 binding = { any_type ~ identifier ~ initializer? ~ end_of_declaration }
 
 assignment = { expression ~ "=" ~ expression ~ end_of_declaration }
 
-expression_statement = { expression ~ end_of_declaration}
-statement = { declaration | assignment | expression_statement }
+expression_statement = { expression ~ end_of_declaration }
+statement = !{ WHITESPACE* ~ (declaration | assignment | expression_statement ) }
 
-declaration = !{ WHITESPACE* ~ field_declaration | binding }
+declaration = !{ WHITESPACE* ~ (field_declaration | binding) }
 
 program = _{ (newline | declaration)* }
 main = ${ SOI ~ program ~ EOI }

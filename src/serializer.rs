@@ -9,6 +9,7 @@ struct ProgramWriter {
     buffer: String,
     indent: usize,
     config: FormatSettings,
+    consecutive_empty_lines: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -23,6 +24,7 @@ impl ProgramWriter {
             buffer: String::new(),
             indent: 0,
             config: config.unwrap_or_default(),
+            consecutive_empty_lines: 0,
         }
     }
 
@@ -48,6 +50,7 @@ impl ProgramWriter {
 
     pub fn end_line(&mut self) {
         self.buffer.push_str("\n");
+        self.consecutive_empty_lines = 0;
     }
 
     pub fn write(&mut self, value: &str) {
@@ -78,6 +81,13 @@ impl ProgramWriter {
         self.dedent();
         self.start_line();
         self.write("}");
+    }
+
+    pub fn empty_line(&mut self) {
+        if self.consecutive_empty_lines < 1 {
+            self.consecutive_empty_lines += 1;
+            self.buffer.push_str("\n");
+        }
     }
 }
 
@@ -282,6 +292,20 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
             }
             writer.write(")");
         }
+        Expression::FieldAccess(target, field_name) => {
+            match target.as_ref() {
+                Expression::Infix(_, _) => {
+                    writer.write("(");
+                    format_expression(writer, target);
+                    writer.write(")");
+                }
+                _ => {
+                    format_expression(writer, target);
+                }
+            }
+            writer.write(".");
+            writer.write(field_name);
+        }
     }
 }
 
@@ -311,13 +335,14 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
             writer.end_line();
         }
         Statement::Decl(decl) => format_declaration(writer, decl),
+        Statement::Newline => writer.empty_line(),
     }
 }
 
 fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
     match decl {
         Declaration::Newline => {
-            writer.end_line();
+            writer.empty_line();
         }
         Declaration::Field { name, ty } => {
             writer.start_line();
@@ -365,21 +390,9 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
 pub fn format_program(declarations: Vec<Declaration>, config: Option<FormatSettings>) -> String {
     let mut writer = ProgramWriter::new(config);
 
-    let mut consecutive_newlines = 0;
+    println!("{:#?}", declarations);
 
     for declaration in declarations.iter() {
-        match declaration {
-            Declaration::Newline if consecutive_newlines >= 2 => {
-                continue;
-            }
-            Declaration::Newline => {
-                consecutive_newlines += 1;
-            }
-            _ => {
-                consecutive_newlines = 1;
-            }
-        }
-
         format_declaration(&mut writer, declaration);
     }
 

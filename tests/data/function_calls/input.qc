@@ -1,4 +1,8 @@
 void() main = {
   foo();
-  bar();
+  bar("hello, world!");
+  add(1, 2, 3);
+  a(b(0));
+
+  float a = (sin(1.0) + cos(1.0)) / MATH_PI;
 };
