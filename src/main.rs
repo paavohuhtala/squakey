@@ -4,8 +4,6 @@ fn main() {
     let input = include_str!("../test_files/defs.qc");
     let program = parse_program(&input);
 
-    println!("{:?}", program);
-
     let formatted = format_program(program, None);
 
     println!("{}", formatted);

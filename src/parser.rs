@@ -263,7 +263,7 @@ fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
     CLIMBER.climb(pairs, parse_unary_expression, infix)
 }
 
-fn parse_statement(pair: Pair<Rule>) -> Vec<Statement> {
+fn parse_statement(pair: Pair<Rule>) -> Statement {
     let statement = pair.assert_and_unwrap_only_child(Rule::statement);
     match statement.as_rule() {
         Rule::assignment => {
@@ -272,20 +272,17 @@ fn parse_statement(pair: Pair<Rule>) -> Vec<Statement> {
             let left = parse_expression(left);
             let right = inner.next().unwrap();
             let right = parse_expression(right);
-            vec![Statement::Assignment {
+            Statement::Assignment {
                 lvalue: left,
                 rvalue: right,
-            }]
+            }
         }
-        Rule::declaration => parse_declaration(statement)
-            .into_iter()
-            .map(Statement::Decl)
-            .collect(),
+        Rule::declaration => Statement::Decl(parse_declaration(statement)),
         Rule::expression_statement => {
             let inner = statement.into_inner().next().unwrap();
-            vec![Statement::Expression(parse_expression(inner))]
+            Statement::Expression(parse_expression(inner))
         }
-        Rule::newline => vec![Statement::Newline],
+        Rule::newline => Statement::Newline,
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
     }
 }
@@ -300,8 +297,7 @@ fn parse_block(pair: Pair<Rule>) -> Block {
                 statements.push(Statement::Newline);
             }
             Rule::statement => {
-                let mut new_statements = parse_statement(statement_or_newline);
-                statements.append(&mut new_statements);
+                statements.push(parse_statement(statement_or_newline));
             }
             otherwise => panic!("Expected statement or newline, found {:?}", otherwise),
         };
@@ -310,7 +306,7 @@ fn parse_block(pair: Pair<Rule>) -> Block {
     Block(statements)
 }
 
-fn parse_binding(pair: Pair<Rule>) -> Vec<Declaration> {
+fn parse_binding(pair: Pair<Rule>) -> Declaration {
     fn parse_initializer(pair: Pair<Rule>) -> BindingInitializer {
         let child = pair.assert_and_unwrap_only_child(Rule::initializer);
         match child.as_rule() {
@@ -353,7 +349,7 @@ fn parse_binding(pair: Pair<Rule>) -> Vec<Declaration> {
     let ty = inner.next().unwrap();
     let ty = parse_type(ty);
 
-    let mut declarations = Vec::new();
+    let mut names = Vec::new();
 
     loop {
         let next = inner.next().expect("Unexpected end of binding list");
@@ -368,24 +364,25 @@ fn parse_binding(pair: Pair<Rule>) -> Vec<Declaration> {
                     _ => None,
                 };
 
-                declarations.push(Declaration::Binding {
-                    name,
-                    ty: ty.clone(),
-                    initializer,
-                    modifiers: modifiers.clone(),
-                });
+                names.push(BoundName { name, initializer });
             }
-            Rule::end_of_declaration => return declarations,
+            Rule::end_of_declaration => {
+                return Declaration::Binding {
+                    ty,
+                    modifiers,
+                    names,
+                }
+            }
             otherwise => panic!("unexpected rule: {:?}", otherwise),
         }
     }
 }
 
-fn parse_declaration(pair: Pair<Rule>) -> Vec<Declaration> {
+fn parse_declaration(pair: Pair<Rule>) -> Declaration {
     let inner = pair.assert_and_unwrap(Rule::declaration).next().unwrap();
     match inner.as_rule() {
         // TODO
-        Rule::line_comment | Rule::newline => vec![Declaration::Newline],
+        Rule::line_comment | Rule::newline => Declaration::Newline,
         Rule::field_declaration => {
             let mut inner = inner.into_inner();
 
@@ -395,7 +392,7 @@ fn parse_declaration(pair: Pair<Rule>) -> Vec<Declaration> {
             let name = inner.next().unwrap();
             let name = parse_identifier(name);
 
-            vec![Declaration::Field { name, ty }]
+            Declaration::Field { name, ty }
         }
         Rule::binding => parse_binding(inner),
 
@@ -421,8 +418,7 @@ pub fn parse_program(input: &str) -> Vec<Declaration> {
                     continue;
                 }
 
-                let mut new_declarations = parse_declaration(declaration_or_newline);
-                declarations.append(&mut new_declarations);
+                declarations.push(parse_declaration(declaration_or_newline));
             }
 
             declarations

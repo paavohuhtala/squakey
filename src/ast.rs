@@ -116,6 +116,12 @@ pub enum BindingInitializer<'a> {
 }
 
 #[derive(Debug)]
+pub struct BoundName<'a> {
+    pub name: &'a str,
+    pub initializer: Option<BindingInitializer<'a>>,
+}
+
+#[derive(Debug)]
 pub enum Declaration<'a> {
     Newline,
     Field {
@@ -123,9 +129,8 @@ pub enum Declaration<'a> {
         ty: Type<'a>,
     },
     Binding {
-        name: &'a str,
-        ty: Type<'a>,
         modifiers: Vec<BindingModifier>,
-        initializer: Option<BindingInitializer<'a>>,
+        ty: Type<'a>,
+        names: Vec<BoundName<'a>>,
     },
 }

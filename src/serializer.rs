@@ -372,10 +372,9 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             writer.end_line();
         }
         Declaration::Binding {
-            name,
-            ty,
-            initializer,
             modifiers,
+            ty,
+            names,
         } => {
             writer.start_line();
 
@@ -390,20 +389,27 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
 
             format_type(writer, ty);
             writer.write(" ");
-            writer.write(name);
 
-            match initializer {
-                None => {}
-                Some(BindingInitializer::Block(block)) => {
-                    writer.write(" =");
-                    format_block(writer, block);
+            for (i, BoundName { name, initializer }) in names.iter().enumerate() {
+                if i > 0 {
+                    writer.write(", ");
                 }
-                Some(BindingInitializer::Expr(expr)) => {
-                    writer.write(" = ");
-                    format_expression(writer, expr)
-                }
-                Some(BindingInitializer::BuiltinReference(id)) => {
-                    write!(writer, " = #{}", id).unwrap();
+
+                writer.write(name);
+
+                match initializer {
+                    None => {}
+                    Some(BindingInitializer::Block(block)) => {
+                        writer.write(" =");
+                        format_block(writer, block);
+                    }
+                    Some(BindingInitializer::Expr(expr)) => {
+                        writer.write(" = ");
+                        format_expression(writer, expr)
+                    }
+                    Some(BindingInitializer::BuiltinReference(id)) => {
+                        write!(writer, " = #{}", id).unwrap();
+                    }
                 }
             }
 
