@@ -129,12 +129,20 @@ fn format_type(writer: &mut ProgramWriter, ty: &Type) {
         Type::Builtin(builtin_type) => {
             writer.write(builtin_type_as_str(*builtin_type));
         }
+        Type::FieldReference(inner) => {
+            writer.write(".");
+            format_type(writer, inner.as_ref());
+        }
         Type::Function {
             return_type,
             arguments,
         } => {
             format_type(writer, &Type::Builtin(*return_type));
             format_argument_list(writer, arguments)
+        }
+        Type::Pointer(inner) => {
+            format_type(writer, inner);
+            writer.write("*");
         }
     }
 }
@@ -229,7 +237,7 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
         Expression::Number(number) => {
             write!(writer, "{}", number).unwrap();
         }
-        Expression::Vector(_, _, _) => todo!(),
+        Expression::Vector(x, y, z) => write!(writer, "'{} {} {}'", x, y, z).unwrap(),
         Expression::Identifier(identifier) => {
             writer.write(identifier);
         }
@@ -339,6 +347,16 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
     }
 }
 
+fn format_block(writer: &mut ProgramWriter, block: &Block) {
+    writer.start_block(BlockSpacing::SpaceBeforeOpen);
+
+    for statement in &block.0 {
+        format_statement(writer, statement);
+    }
+
+    writer.end_block();
+}
+
 fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
     match decl {
         Declaration::Newline => {
@@ -357,8 +375,19 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             name,
             ty,
             initializer,
+            modifiers,
         } => {
             writer.start_line();
+
+            for modifier in modifiers.iter() {
+                writer.write(match modifier {
+                    BindingModifier::Const => "const",
+                    BindingModifier::Var => "var",
+                    BindingModifier::Nosave => "nosave",
+                });
+                writer.write(" ");
+            }
+
             format_type(writer, ty);
             writer.write(" ");
             writer.write(name);
@@ -367,17 +396,14 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
                 None => {}
                 Some(BindingInitializer::Block(block)) => {
                     writer.write(" =");
-                    writer.start_block(BlockSpacing::SpaceBeforeOpen);
-
-                    for statement in block {
-                        format_statement(writer, statement);
-                    }
-
-                    writer.end_block();
+                    format_block(writer, block);
                 }
                 Some(BindingInitializer::Expr(expr)) => {
                     writer.write(" = ");
                     format_expression(writer, expr)
+                }
+                Some(BindingInitializer::BuiltinReference(id)) => {
+                    write!(writer, " = #{}", id).unwrap();
                 }
             }
 

@@ -6,8 +6,9 @@
 //  https://github.com/pointlander/peg/blob/0d618c19cd3c991caccb57451d418b16a6ea2595/grammars/java/java_1_7.peg
 
 WHITESPACE = _{ " " | "\t" | silent_newline }
-COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+COMMENT = _{ ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!newline ~ ANY)* ~ silent_newline) }
 
+space = _{ " " | "\t" }
 silent_newline = _{ "\r\n" | "\n" }
 newline = ${ ("\r\n" | "\n") }
 
@@ -30,9 +31,10 @@ string_char = {
     | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
     | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
 }
+integer_literal = @{ "0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 number_literal = @{
     "-"?
-    ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+    ~ integer_literal
     ~ ("." ~ ASCII_DIGIT*)?
 // TODO: Looks like FTEQCC doesn't support scientific notation?
 //    ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
@@ -79,24 +81,54 @@ primary = _{
   prefixed
 }
 
-argument = { builtin_type ~ identifier }
+argument = { any_type ~ identifier }
 argument_list = {("(" ~ ")") | "(" ~ argument ~ ( "," ~ argument )* ~ ")" }
 function_type = { builtin_type ~ argument_list }
-any_type = _{ function_type | builtin_type }
+field_reference_type = { "." ~ any_type }
+pointer_asterisk = { "*" }
+any_type = { (function_type | field_reference_type | builtin_type) ~ pointer_asterisk? }
 
-end_of_declaration = @{ ";" ~ newline? }
-field_declaration = { "." ~ any_type ~ identifier ~ end_of_declaration }
+end_of_declaration = @{ ";"? ~ newline? }
+end_of_statement = @{ ";" ~ newline? }
+
+field_declaration = !{ "." ~ any_type ~ identifier ~ ( "," ~ identifier )* ~ end_of_declaration }
 
 block = ${ "{" ~ silent_newline? ~ (newline | statement)* ~ WHITESPACE* ~ "}" }
-initializer = { "=" ~ ( block | expression ) }
-binding = { any_type ~ identifier ~ initializer? ~ end_of_declaration }
+builtin_reference = ${ "#" ~ integer_literal }
+initializer = { "=" ~ ( builtin_reference | block | expression ) }
 
-assignment = { expression ~ "=" ~ expression ~ end_of_declaration }
+binding_const = { "const" }
+binding_var = { "var" }
+binding_nosave = { "nosave" }
+binding_modifier = _{ binding_const | binding_var | binding_nosave }
+binding_modifiers = { binding_modifier* }
 
-expression_statement = { expression ~ end_of_declaration }
-statement = !{ WHITESPACE* ~ (declaration | assignment | expression_statement ) }
+binding = !{
+  "local"? ~
+  binding_modifiers ~
+  any_type ~
+  identifier ~
+  initializer? ~
+  ("," ~ identifier ~ initializer?)* ~
+  end_of_declaration
+}
 
-declaration = !{ WHITESPACE* ~ (field_declaration | binding) }
+assignment = { expression ~ "=" ~ expression ~ end_of_statement }
+line_comment = ${ "//" ~ (!newline ~ ANY)* ~ silent_newline }
 
-program = _{ (newline | declaration)* }
+expression_statement = { expression ~ end_of_statement }
+statement = !{ WHITESPACE* ~ (line_comment | declaration | assignment | expression_statement ) }
+
+declaration = ${
+  (space* ~ newline) |
+  (space* ~ line_comment) |
+  WHITESPACE* ~
+    (
+      field_declaration |
+      binding
+    ) ~
+    space*
+}
+
+program = _{ declaration* }
 main = ${ SOI ~ program ~ EOI }

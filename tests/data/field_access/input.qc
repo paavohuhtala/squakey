@@ -3,4 +3,10 @@ void() main = {
   a.b.c;
   getVector().x;
   self.explode();
+
+
+
+
+
+  a.b.c.d = "foo";
 };

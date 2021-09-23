@@ -6,19 +6,21 @@ pub enum BuiltinType {
     Entity,
     Void,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Argument<'a> {
     pub name: &'a str,
     pub ty: Type<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Type<'a> {
     Builtin(BuiltinType),
     Function {
         return_type: BuiltinType,
         arguments: Vec<Argument<'a>>,
     },
+    FieldReference(Box<Type<'a>>),
+    Pointer(Box<Type<'a>>),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -59,10 +61,7 @@ impl InfixOp {
     }
 
     pub fn is_associative(self) -> bool {
-        match self {
-            InfixOp::Sub | InfixOp::Div => false,
-            _ => true,
-        }
+        !matches!(self, InfixOp::Sub | InfixOp::Div)
     }
 
     pub fn is_left_associative(self) -> bool {
@@ -87,15 +86,6 @@ pub enum Expression<'a> {
     FieldAccess(Box<Expression<'a>>, &'a str),
 }
 
-impl<'a> Expression<'a> {
-    pub fn infix_precedence(&self) -> Option<i32> {
-        match self {
-            Expression::Infix(op, _) => Some(op.precedence()),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum Statement<'a> {
     Block(Vec<Statement<'a>>),
@@ -109,9 +99,20 @@ pub enum Statement<'a> {
 }
 
 #[derive(Debug)]
+pub struct Block<'a>(pub Vec<Statement<'a>>);
+
+#[derive(Debug, Clone, Copy)]
+pub enum BindingModifier {
+    Const,
+    Var,
+    Nosave,
+}
+
+#[derive(Debug)]
 pub enum BindingInitializer<'a> {
     Expr(Expression<'a>),
-    Block(Vec<Statement<'a>>),
+    Block(Block<'a>),
+    BuiltinReference(u32),
 }
 
 #[derive(Debug)]
@@ -124,6 +125,7 @@ pub enum Declaration<'a> {
     Binding {
         name: &'a str,
         ty: Type<'a>,
+        modifiers: Vec<BindingModifier>,
         initializer: Option<BindingInitializer<'a>>,
     },
 }
