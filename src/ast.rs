@@ -1,3 +1,7 @@
+use std::ops::Deref;
+
+use pest::Span;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinType {
     String,
@@ -6,21 +10,21 @@ pub enum BuiltinType {
     Entity,
     Void,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Argument<'a> {
     pub name: &'a str,
-    pub ty: Type<'a>,
+    pub ty: Node<'a, Type<'a>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Type<'a> {
     Builtin(BuiltinType),
     Function {
         return_type: BuiltinType,
-        arguments: Vec<Argument<'a>>,
+        arguments: Vec<Node<'a, Argument<'a>>>,
     },
-    FieldReference(Box<Type<'a>>),
-    Pointer(Box<Type<'a>>),
+    FieldReference(Box<Node<'a, Type<'a>>>),
+    Pointer(Box<Node<'a, Type<'a>>>),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -74,32 +78,34 @@ impl InfixOp {
     }
 }
 
+pub type ExpressionNode<'a> = Node<'a, Expression<'a>>;
+
 #[derive(Debug)]
 pub enum Expression<'a> {
     String(&'a str),
     Number(f32),
     Vector(f32, f32, f32),
     Identifier(&'a str),
-    Infix(InfixOp, Box<(Expression<'a>, Expression<'a>)>),
-    Prefix(PrefixOp, Box<Expression<'a>>),
-    Call(Box<Expression<'a>>, Vec<Expression<'a>>),
-    FieldAccess(Box<Expression<'a>>, &'a str),
+    Infix(InfixOp, Box<(ExpressionNode<'a>, ExpressionNode<'a>)>),
+    Prefix(PrefixOp, Box<ExpressionNode<'a>>),
+    Call(Box<ExpressionNode<'a>>, Vec<ExpressionNode<'a>>),
+    FieldAccess(Box<ExpressionNode<'a>>, &'a str),
 }
 
 #[derive(Debug)]
 pub enum Statement<'a> {
-    Block(Vec<Statement<'a>>),
-    Expression(Expression<'a>),
+    Block(Node<'a, Block<'a>>),
+    Expression(ExpressionNode<'a>),
     Assignment {
-        lvalue: Expression<'a>,
-        rvalue: Expression<'a>,
+        lvalue: ExpressionNode<'a>,
+        rvalue: ExpressionNode<'a>,
     },
-    Decl(Declaration<'a>),
+    Decl(Node<'a, Declaration<'a>>),
     Newline,
 }
 
 #[derive(Debug)]
-pub struct Block<'a>(pub Vec<Statement<'a>>);
+pub struct Block<'a>(pub Vec<Node<'a, Statement<'a>>>);
 
 #[derive(Debug, Clone, Copy)]
 pub enum BindingModifier {
@@ -110,8 +116,8 @@ pub enum BindingModifier {
 
 #[derive(Debug)]
 pub enum BindingInitializer<'a> {
-    Expr(Expression<'a>),
-    Block(Block<'a>),
+    Expr(ExpressionNode<'a>),
+    Block(Node<'a, Block<'a>>),
     BuiltinReference(u32),
 }
 
@@ -124,13 +130,92 @@ pub struct BoundName<'a> {
 #[derive(Debug)]
 pub enum Declaration<'a> {
     Newline,
+    Comment(&'a str),
     Field {
         name: &'a str,
-        ty: Type<'a>,
+        ty: Node<'a, Type<'a>>,
     },
     Binding {
         modifiers: Vec<BindingModifier>,
-        ty: Type<'a>,
-        names: Vec<BoundName<'a>>,
+        ty: Node<'a, Type<'a>>,
+        names: Vec<Node<'a, BoundName<'a>>>,
     },
 }
+
+#[derive(Debug)]
+pub struct Node<'a, T>
+where
+    T: 'a,
+{
+    value: T,
+    span: Option<Span<'a>>,
+    pub comment_before: Option<&'a str>,
+    pub comment_after: Option<&'a str>,
+}
+
+impl<'a, T> Node<'a, T>
+where
+    T: 'a,
+{
+    pub fn new(value: T) -> Self {
+        Node {
+            value,
+            span: None,
+            comment_before: None,
+            comment_after: None,
+        }
+    }
+
+    pub fn inner(&self) -> &T {
+        &self.value
+    }
+
+    pub fn with_span(mut self, span: Span<'a>) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    pub fn with_comment_before(mut self, comment: &'a str) -> Self {
+        self.comment_before = Some(comment);
+        self
+    }
+
+    pub fn with_comment_after(mut self, comment: &'a str) -> Self {
+        self.comment_after = Some(comment);
+        self
+    }
+}
+
+impl<'a, T> Deref for Node<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<'a, T: IntoIterator> IntoIterator for Node<'a, T> {
+    type Item = T::Item;
+    type IntoIter = T::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.value.into_iter()
+    }
+}
+
+pub trait AstNode
+where
+    Self: Sized,
+{
+    fn into_node<'a>(self, span: Span<'a>) -> Node<'a, Self> {
+        Node::new(self).with_span(span)
+    }
+}
+
+impl AstNode for Expression<'_> {}
+impl AstNode for Statement<'_> {}
+impl AstNode for Declaration<'_> {}
+impl AstNode for Block<'_> {}
+impl AstNode for Type<'_> {}
+impl AstNode for Argument<'_> {}
+impl AstNode for BoundName<'_> {}

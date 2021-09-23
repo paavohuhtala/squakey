@@ -108,7 +108,7 @@ fn builtin_type_as_str(builtin_type: BuiltinType) -> &'static str {
     }
 }
 
-fn format_argument_list(writer: &mut ProgramWriter, argument_list: &[Argument]) {
+fn format_argument_list(writer: &mut ProgramWriter, argument_list: &[Node<Argument>]) {
     writer.write("(");
 
     for (i, argument) in argument_list.iter().enumerate() {
@@ -243,7 +243,7 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
         }
         Expression::Prefix(op, inner) => {
             // Simplify chained prefix ops
-            match (op, inner.as_ref()) {
+            match (op, inner.inner()) {
                 (PrefixOp::Neg, Expression::Prefix(PrefixOp::Neg, inner))
                 | (PrefixOp::Not, Expression::Prefix(PrefixOp::Not, inner)) => {
                     return format_expression(writer, inner);
@@ -261,7 +261,7 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
 
             writer.write(op_str);
 
-            match inner.as_ref() {
+            match inner.inner() {
                 Expression::Infix(_, _) => {
                     writer.write("(");
                     format_expression(writer, inner);
@@ -279,7 +279,7 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
             format_infix(writer, *op, left, right);
         }
         Expression::Call(target, args) => {
-            match target.as_ref() {
+            match target.inner() {
                 Expression::Infix(_, _) => {
                     writer.write("(");
                     format_expression(writer, target);
@@ -301,7 +301,7 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
             writer.write(")");
         }
         Expression::FieldAccess(target, field_name) => {
-            match target.as_ref() {
+            match target.inner() {
                 Expression::Infix(_, _) => {
                     writer.write("(");
                     format_expression(writer, target);
@@ -317,22 +317,33 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
     }
 }
 
-fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
-    match statement {
+fn format_statement(writer: &mut ProgramWriter, statement: &Node<Statement>) {
+    let write_comment_after = |writer: &mut ProgramWriter| {
+        if let Some(comment) = &statement.comment_after {
+            writer.write(" // ");
+            writer.write(comment);
+        }
+    };
+
+    match statement.inner() {
         Statement::Block(block) => {
             writer.start_block(BlockSpacing::None);
 
-            for statement in block {
+            for statement in block.inner().0.iter() {
                 format_statement(writer, statement);
             }
 
             writer.end_block();
+            // TODO this is not correct - but the parser can't parse this either
         }
         Statement::Expression(expr) => {
             writer.start_line();
             format_expression(writer, expr);
             writer.write(";");
-            writer.end_line()
+
+            write_comment_after(writer);
+
+            writer.end_line();
         }
         Statement::Assignment { lvalue, rvalue } => {
             writer.start_line();
@@ -340,9 +351,15 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Statement) {
             writer.write(" = ");
             format_expression(writer, rvalue);
             writer.write(";");
+
+            write_comment_after(writer);
+
             writer.end_line();
         }
-        Statement::Decl(decl) => format_declaration(writer, decl),
+        Statement::Decl(decl) => {
+            // format_declaration handles comment formatting
+            format_declaration(writer, decl);
+        }
         Statement::Newline => writer.empty_line(),
     }
 }
@@ -357,10 +374,26 @@ fn format_block(writer: &mut ProgramWriter, block: &Block) {
     writer.end_block();
 }
 
-fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
-    match decl {
+fn format_declaration(writer: &mut ProgramWriter, decl: &Node<Declaration>) {
+    let write_comment_after = |writer: &mut ProgramWriter| {
+        if let Some(comment) = &decl.comment_after {
+            writer.write(" // ");
+            writer.write(comment);
+        }
+    };
+
+    match decl.inner() {
         Declaration::Newline => {
             writer.empty_line();
+        }
+        Declaration::Comment(text) => {
+            writer.start_line();
+            writer.write("// ");
+            writer.write(text);
+
+            write_comment_after(writer);
+
+            writer.end_line();
         }
         Declaration::Field { name, ty } => {
             writer.start_line();
@@ -369,6 +402,9 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             writer.write(" ");
             writer.write(name);
             writer.write(";");
+
+            write_comment_after(writer);
+
             writer.end_line();
         }
         Declaration::Binding {
@@ -390,7 +426,9 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             format_type(writer, ty);
             writer.write(" ");
 
-            for (i, BoundName { name, initializer }) in names.iter().enumerate() {
+            for (i, node) in names.iter().enumerate() {
+                let BoundName { name, initializer } = node.inner();
+
                 if i > 0 {
                     writer.write(", ");
                 }
@@ -414,15 +452,21 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Declaration) {
             }
 
             writer.write(";");
+
+            write_comment_after(writer);
+
             writer.end_line();
         }
     }
 }
 
-pub fn format_program(declarations: Vec<Declaration>, config: Option<FormatSettings>) -> String {
+pub fn format_program(
+    declarations: Vec<Node<Declaration>>,
+    config: Option<FormatSettings>,
+) -> String {
     let mut writer = ProgramWriter::new(config);
 
-    println!("{:#?}", declarations);
+    println!("{:?}", declarations);
 
     for declaration in declarations.iter() {
         format_declaration(&mut writer, declaration);

@@ -113,11 +113,14 @@ binding = !{
   end_of_declaration
 }
 
-assignment = { expression ~ "=" ~ expression ~ end_of_statement }
-line_comment = ${ "//" ~ (!newline ~ ANY)* ~ silent_newline }
+assignment = !{ expression ~ "=" ~ expression ~ end_of_statement }
 
-expression_statement = { expression ~ end_of_statement }
-statement = !{ WHITESPACE* ~ (line_comment | declaration | assignment | expression_statement ) }
+comment_content = ${ (!newline ~ ANY)* }
+line_comment = ${ "//" ~ comment_content ~ silent_newline }
+comment_after = ${ space* ~ "//"  ~ comment_content ~ silent_newline }
+
+expression_statement = !{ expression ~ end_of_statement }
+statement = ${ WHITESPACE* ~ (line_comment | declaration | assignment | expression_statement ) ~ comment_after? }
 
 declaration = ${
   (space* ~ newline) |
@@ -127,7 +130,7 @@ declaration = ${
       field_declaration |
       binding
     ) ~
-    space*
+    (comment_after | space*)
 }
 
 program = _{ declaration* }

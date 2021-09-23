@@ -1,7 +1,7 @@
 use core::panic;
 
 use pest::{
-    iterators::{Pair, Pairs},
+    iterators::Pair,
     prec_climber::{Assoc, Operator, PrecClimber},
     Parser,
 };
@@ -9,55 +9,7 @@ use pest::{
 use once_cell::{self, sync::Lazy};
 
 use crate::ast::*;
-
-#[derive(Parser)]
-#[grammar = "quakec.pest"]
-struct QuakeCParser;
-
-trait PairExt<'a>
-where
-    Self: Sized + std::fmt::Debug,
-{
-    fn as_rule(&self) -> Rule;
-    fn into_inner(self) -> Pairs<'a, Rule>;
-
-    fn assert_and_unwrap(self, rule: Rule) -> Pairs<'a, Rule> {
-        let as_rule = self.as_rule();
-        if as_rule == rule {
-            self.into_inner()
-        } else {
-            panic!("expected {:?}, found {:?}", rule, as_rule);
-        }
-    }
-
-    fn assert_rule(&self, rule: Rule) {
-        assert_eq!(self.as_rule(), rule);
-    }
-
-    fn assert_and_unwrap_only_child(self, rule: Rule) -> Pair<'a, Rule> {
-        let mut unwrapped = self.assert_and_unwrap(rule);
-        let first = unwrapped
-            .next()
-            .expect("Expected pair to contain at least one child.");
-
-        match unwrapped.next() {
-            Some(next) => {
-                panic!("Expected exactly one child, found {:?}", next.as_rule());
-            }
-            None => first,
-        }
-    }
-}
-
-impl<'a> PairExt<'a> for Pair<'a, Rule> {
-    fn as_rule(&self) -> Rule {
-        self.as_rule()
-    }
-
-    fn into_inner(self) -> Pairs<'a, Rule> {
-        Pair::into_inner(self)
-    }
-}
+use crate::grammar::*;
 
 fn parse_builtin_type(pair: Pair<Rule>) -> BuiltinType {
     let inner = pair.assert_and_unwrap_only_child(Rule::builtin_type);
@@ -77,22 +29,26 @@ fn parse_identifier(pair: Pair<Rule>) -> &str {
     pair.as_str()
 }
 
-fn parse_argument(pair: Pair<Rule>) -> Argument {
+fn parse_argument(pair: Pair<Rule>) -> Node<Argument> {
+    let span = pair.as_span();
     let mut inner = pair.assert_and_unwrap(Rule::argument);
     let ty = inner.next().unwrap();
     let ty = parse_type(ty);
 
     let name = inner.next().unwrap();
     let name = parse_identifier(name);
-    Argument { name, ty }
+    (Argument { name, ty }).into_node(span)
 }
 
-fn parse_type(pair: Pair<Rule>) -> Type {
+fn parse_type(pair: Pair<Rule>) -> Node<Type> {
+    let span = pair.as_span();
     let mut inner = pair.assert_and_unwrap(Rule::any_type);
-    let ty = inner.next().unwrap();
-    let ty = match ty.as_rule() {
+    let ty_pair = inner.next().unwrap();
+
+    let ty_span = ty_pair.as_span();
+    let ty = match ty_pair.as_rule() {
         Rule::function_type => {
-            let mut inner = ty.into_inner();
+            let mut inner = ty_pair.into_inner();
             let return_type = inner.next().unwrap();
             let return_type = parse_builtin_type(return_type);
 
@@ -110,18 +66,19 @@ fn parse_type(pair: Pair<Rule>) -> Type {
             }
         }
         Rule::field_reference_type => {
-            let inner = ty.assert_and_unwrap_only_child(Rule::field_reference_type);
+            let inner = ty_pair.assert_and_unwrap_only_child(Rule::field_reference_type);
             let inner = parse_type(inner);
             Type::FieldReference(Box::new(inner))
         }
-        Rule::builtin_type => Type::Builtin(parse_builtin_type(ty)),
+        Rule::builtin_type => Type::Builtin(parse_builtin_type(ty_pair)),
         otherwise => panic!("unexpected rule {:?}", otherwise),
-    };
+    }
+    .into_node(ty_span);
 
     match inner.peek() {
         Some(rule) if rule.as_rule() == Rule::pointer_asterisk => {
             inner.next();
-            return Type::Pointer(Box::new(ty));
+            return Type::Pointer(Box::new(ty)).into_node(span);
         }
         Some(otherwise) => panic!(
             "expected pointer asterisk or end of type, found {:?}",
@@ -131,7 +88,7 @@ fn parse_type(pair: Pair<Rule>) -> Type {
     }
 }
 
-fn parse_call_arguments<'a>(pair: Pair<'a, Rule>) -> Vec<Expression<'a>> {
+fn parse_call_arguments(pair: Pair<Rule>) -> Vec<Node<Expression>> {
     let args = pair.assert_and_unwrap(Rule::call_arguments);
 
     let mut arguments = Vec::new();
@@ -143,21 +100,22 @@ fn parse_call_arguments<'a>(pair: Pair<'a, Rule>) -> Vec<Expression<'a>> {
     arguments
 }
 
-fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
+fn parse_primary_expr(pair: Pair<Rule>) -> Node<Expression> {
+    let span = pair.as_span();
     match pair.as_rule() {
         Rule::string_literal => {
             let literal = pair
                 .assert_and_unwrap_only_child(Rule::string_literal)
                 .as_str();
-            Expression::String(literal)
+            Expression::String(literal).into_node(span)
         }
         Rule::identifier => {
             let name = pair.as_str();
-            Expression::Identifier(name)
+            Expression::Identifier(name).into_node(span)
         }
         Rule::number_literal => {
             let number = pair.as_str().parse().unwrap();
-            Expression::Number(number)
+            Expression::Number(number).into_node(span)
         }
         Rule::expression => parse_expression(pair),
         Rule::prefixed => {
@@ -173,11 +131,12 @@ fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
             let inner = children.next().unwrap();
             let inner = parse_unary_expression(inner);
 
-            Expression::Prefix(prefix_op, Box::new(inner))
+            Expression::Prefix(prefix_op, Box::new(inner)).into_node(span)
         }
         Rule::identifier_call => {
             let mut children = pair.assert_and_unwrap(Rule::identifier_call);
             let target = children.next().unwrap();
+            let target_span = target.as_span();
             let identifier = parse_identifier(target);
 
             let args = match children.next() {
@@ -185,7 +144,8 @@ fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
                 Some(args) => parse_call_arguments(args),
             };
 
-            Expression::Call(Box::new(Expression::Identifier(identifier)), args)
+            let identifier_node = Expression::Identifier(identifier).into_node(target_span);
+            Expression::Call(Box::new(identifier_node), args).into_node(span)
         }
         Rule::vector_literal => {
             let mut children = pair.assert_and_unwrap(Rule::vector_literal);
@@ -193,7 +153,7 @@ fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
             let y = children.next().unwrap().as_str().parse().unwrap();
             let z = children.next().unwrap().as_str().parse().unwrap();
 
-            Expression::Vector(x, y, z)
+            Expression::Vector(x, y, z).into_node(span)
         }
         otherwise => {
             panic!("expected any primary expression, found {:?}", otherwise);
@@ -201,7 +161,7 @@ fn parse_primary_expr<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
     }
 }
 
-fn parse_unary_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
+fn parse_unary_expression(pair: Pair<Rule>) -> Node<Expression> {
     let mut inner = pair.assert_and_unwrap(Rule::unary_expression);
 
     let primary = inner.next().unwrap();
@@ -210,17 +170,19 @@ fn parse_unary_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
     let mut expr = primary;
 
     while let Some(op) = inner.next() {
+        let span = op.as_span();
         let mut pairs = op.assert_and_unwrap(Rule::selector);
 
         let identifier = pairs.next().unwrap();
         let identifier = parse_identifier(identifier);
 
-        expr = Expression::FieldAccess(Box::new(expr), identifier);
+        expr = Expression::FieldAccess(Box::new(expr), identifier).into_node(span);
 
         match pairs.next() {
             Some(rule) => {
+                let span = rule.as_span();
                 let args = parse_call_arguments(rule);
-                expr = Expression::Call(Box::new(expr), args);
+                expr = Expression::Call(Box::new(expr), args).into_node(span);
             }
             None => {}
         }
@@ -229,11 +191,12 @@ fn parse_unary_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
     expr
 }
 
-fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
+fn parse_expression<'a>(pair: Pair<'a, Rule>) -> ExpressionNode<'a> {
+    let span = pair.as_span();
     let pairs = pair.assert_and_unwrap(Rule::expression);
 
-    let infix = |lhs: Expression<'a>, op: Pair<Rule>, rhs: Expression<'a>| {
-        let op = match op.as_rule() {
+    let infix = |lhs: ExpressionNode<'a>, op_pair: Pair<'a, Rule>, rhs: ExpressionNode<'a>| {
+        let op = match op_pair.as_rule() {
             Rule::add => InfixOp::Add,
             Rule::sub => InfixOp::Sub,
             Rule::mul => InfixOp::Mul,
@@ -248,7 +211,7 @@ fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
             _ => unreachable!(),
         };
 
-        Expression::Infix(op, Box::new((lhs, rhs)))
+        Expression::Infix(op, Box::new((lhs, rhs))).into_node(span.clone())
     };
 
     static CLIMBER: Lazy<PrecClimber<Rule>> = Lazy::new(|| {
@@ -263,11 +226,14 @@ fn parse_expression<'a>(pair: Pair<'a, Rule>) -> Expression<'a> {
     CLIMBER.climb(pairs, parse_unary_expression, infix)
 }
 
-fn parse_statement(pair: Pair<Rule>) -> Statement {
-    let statement = pair.assert_and_unwrap_only_child(Rule::statement);
-    match statement.as_rule() {
+fn parse_statement(pair: Pair<Rule>) -> Node<Statement> {
+    let span = pair.as_span();
+    let mut inner = pair.assert_and_unwrap(Rule::statement);
+
+    let statement_pair = inner.next().unwrap();
+    let statement = match statement_pair.as_rule() {
         Rule::assignment => {
-            let mut inner = statement.into_inner();
+            let mut inner = statement_pair.into_inner();
             let left = inner.next().unwrap();
             let left = parse_expression(left);
             let right = inner.next().unwrap();
@@ -277,24 +243,37 @@ fn parse_statement(pair: Pair<Rule>) -> Statement {
                 rvalue: right,
             }
         }
-        Rule::declaration => Statement::Decl(parse_declaration(statement)),
+        Rule::declaration => Statement::Decl(parse_declaration(statement_pair)),
         Rule::expression_statement => {
-            let inner = statement.into_inner().next().unwrap();
+            let inner = statement_pair.into_inner().next().unwrap();
             Statement::Expression(parse_expression(inner))
         }
         Rule::newline => Statement::Newline,
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
+    };
+
+    let node = Node::new(statement).with_span(span);
+
+    match inner.next() {
+        None => node,
+        Some(end_comment) => {
+            let comment = end_comment
+                .assert_and_unwrap_only_child(Rule::comment_after)
+                .as_str();
+            node.with_comment_after(comment)
+        }
     }
 }
 
-fn parse_block(pair: Pair<Rule>) -> Block {
+fn parse_block(pair: Pair<Rule>) -> Node<Block> {
+    let span = pair.as_span();
     let inner = pair.assert_and_unwrap(Rule::block);
     let mut statements = Vec::new();
 
     for statement_or_newline in inner {
         match statement_or_newline.as_rule() {
             Rule::newline => {
-                statements.push(Statement::Newline);
+                statements.push(Statement::Newline.into_node(span.clone()));
             }
             Rule::statement => {
                 statements.push(parse_statement(statement_or_newline));
@@ -303,7 +282,7 @@ fn parse_block(pair: Pair<Rule>) -> Block {
         };
     }
 
-    Block(statements)
+    Block(statements).into_node(span)
 }
 
 fn parse_binding(pair: Pair<Rule>) -> Declaration {
@@ -353,6 +332,7 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
 
     loop {
         let next = inner.next().expect("Unexpected end of binding list");
+        let next_span = next.as_span();
         match next.as_rule() {
             Rule::identifier => {
                 let name = parse_identifier(next);
@@ -364,7 +344,7 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
                     _ => None,
                 };
 
-                names.push(BoundName { name, initializer });
+                names.push(BoundName { name, initializer }.into_node(next_span));
             }
             Rule::end_of_declaration => {
                 return Declaration::Binding {
@@ -378,13 +358,21 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
     }
 }
 
-fn parse_declaration(pair: Pair<Rule>) -> Declaration {
-    let inner = pair.assert_and_unwrap(Rule::declaration).next().unwrap();
-    match inner.as_rule() {
-        // TODO
-        Rule::line_comment | Rule::newline => Declaration::Newline,
+fn parse_declaration(pair: Pair<Rule>) -> Node<Declaration> {
+    let span = pair.as_span();
+    let mut inner = pair.assert_and_unwrap(Rule::declaration);
+    let declaration_pair = inner.next().unwrap();
+
+    let declaration = match declaration_pair.as_rule() {
+        Rule::line_comment => {
+            let comment_text = declaration_pair
+                .assert_and_unwrap_only_child(Rule::line_comment)
+                .as_str();
+            Declaration::Comment(comment_text)
+        }
+        Rule::newline => Declaration::Newline,
         Rule::field_declaration => {
-            let mut inner = inner.into_inner();
+            let mut inner = declaration_pair.into_inner();
 
             let ty = inner.next().unwrap();
             let ty = parse_type(ty);
@@ -394,19 +382,32 @@ fn parse_declaration(pair: Pair<Rule>) -> Declaration {
 
             Declaration::Field { name, ty }
         }
-        Rule::binding => parse_binding(inner),
+        Rule::binding => parse_binding(declaration_pair),
 
         otherwise => panic!("expected declaration, got {:?}", otherwise),
+    };
+
+    let node = Node::new(declaration).with_span(span);
+
+    match inner.next() {
+        None => node,
+        Some(end_comment) => {
+            let comment = end_comment
+                .assert_and_unwrap_only_child(Rule::comment_after)
+                .as_str();
+            node.with_comment_after(comment)
+        }
     }
 }
 
-pub fn parse_program(input: &str) -> Vec<Declaration> {
+pub fn parse_program(input: &str) -> Vec<Node<Declaration>> {
     match QuakeCParser::parse(Rule::main, input) {
         Ok(mut result) => {
             let program = result.next().unwrap().assert_and_unwrap(Rule::main);
             let mut declarations = Vec::new();
 
             for declaration_or_newline in program {
+                let span = declaration_or_newline.as_span();
                 let rule = declaration_or_newline.as_rule();
 
                 if rule == Rule::EOI {
@@ -414,7 +415,7 @@ pub fn parse_program(input: &str) -> Vec<Declaration> {
                 }
 
                 if rule == Rule::newline {
-                    declarations.push(Declaration::Newline);
+                    declarations.push(Declaration::Newline.into_node(span));
                     continue;
                 }
 
