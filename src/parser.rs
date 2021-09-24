@@ -8,11 +8,12 @@ use pest::{
 
 use once_cell::{self, sync::Lazy};
 
-use crate::ast::*;
-use crate::grammar::*;
+use crate::{ast::*, parse_util::QCPairs};
+use crate::{grammar::*, parse_util::QCPair};
 
-fn parse_builtin_type(pair: Pair<Rule>) -> BuiltinType {
-    let inner = pair.assert_and_unwrap_only_child(Rule::builtin_type);
+fn parse_builtin_type(pair: QCPair) -> BuiltinType {
+    let mut inner = pair.assert_and_unwrap_children(Rule::builtin_type);
+    let inner = inner.only_child();
 
     match inner.as_rule() {
         Rule::type_entity => BuiltinType::Entity,
@@ -24,14 +25,14 @@ fn parse_builtin_type(pair: Pair<Rule>) -> BuiltinType {
     }
 }
 
-fn parse_identifier(pair: Pair<Rule>) -> &str {
+fn parse_identifier(pair: QCPair) -> &str {
     pair.assert_rule(Rule::identifier);
     pair.as_str()
 }
 
-fn parse_argument(pair: Pair<Rule>) -> Node<Argument> {
+fn parse_argument(pair: QCPair) -> Node<Argument> {
     let span = pair.as_span();
-    let mut inner = pair.assert_and_unwrap(Rule::argument);
+    let mut inner = pair.assert_and_unwrap_children(Rule::argument);
     let ty = inner.next().unwrap();
     let ty = parse_type(ty);
 
@@ -40,19 +41,19 @@ fn parse_argument(pair: Pair<Rule>) -> Node<Argument> {
     (Argument { name, ty }).into_node(span)
 }
 
-fn parse_type(pair: Pair<Rule>) -> Node<Type> {
+fn parse_type(pair: QCPair) -> Node<Type> {
     let span = pair.as_span();
-    let mut inner = pair.assert_and_unwrap(Rule::any_type);
+    let mut inner = pair.assert_and_unwrap_children(Rule::any_type);
     let ty_pair = inner.next().unwrap();
 
     let ty_span = ty_pair.as_span();
     let ty = match ty_pair.as_rule() {
         Rule::function_type => {
-            let mut inner = ty_pair.into_inner();
+            let mut inner = ty_pair.children();
             let return_type = inner.next().unwrap();
             let return_type = parse_builtin_type(return_type);
 
-            let argument_list = inner.next().unwrap().into_inner();
+            let argument_list = inner.next().unwrap().children();
 
             let mut arguments = Vec::new();
 
@@ -66,7 +67,9 @@ fn parse_type(pair: Pair<Rule>) -> Node<Type> {
             }
         }
         Rule::field_reference_type => {
-            let inner = ty_pair.assert_and_unwrap_only_child(Rule::field_reference_type);
+            let inner = ty_pair
+                .assert_and_unwrap_children(Rule::field_reference_type)
+                .only_child();
             let inner = parse_type(inner);
             Type::FieldReference(Box::new(inner))
         }
@@ -88,8 +91,8 @@ fn parse_type(pair: Pair<Rule>) -> Node<Type> {
     }
 }
 
-fn parse_call_arguments(pair: Pair<Rule>) -> Vec<Node<Expression>> {
-    let args = pair.assert_and_unwrap(Rule::call_arguments);
+fn parse_call_arguments(pair: QCPair) -> Vec<Node<Expression>> {
+    let args = pair.assert_and_unwrap_children(Rule::call_arguments);
 
     let mut arguments = Vec::new();
 
@@ -100,12 +103,13 @@ fn parse_call_arguments(pair: Pair<Rule>) -> Vec<Node<Expression>> {
     arguments
 }
 
-fn parse_primary_expr(pair: Pair<Rule>) -> Node<Expression> {
+fn parse_primary_expr(pair: QCPair) -> Node<Expression> {
     let span = pair.as_span();
     match pair.as_rule() {
         Rule::string_literal => {
             let literal = pair
-                .assert_and_unwrap_only_child(Rule::string_literal)
+                .assert_and_unwrap_children(Rule::string_literal)
+                .only_child()
                 .as_str();
             Expression::String(literal).into_node(span)
         }
@@ -119,7 +123,7 @@ fn parse_primary_expr(pair: Pair<Rule>) -> Node<Expression> {
         }
         Rule::expression => parse_expression(pair),
         Rule::prefixed => {
-            let mut children = pair.assert_and_unwrap(Rule::prefixed);
+            let mut children = pair.assert_and_unwrap_children(Rule::prefixed);
             let op = children.next().unwrap();
 
             let prefix_op = match op.as_rule() {
@@ -134,7 +138,7 @@ fn parse_primary_expr(pair: Pair<Rule>) -> Node<Expression> {
             Expression::Prefix(prefix_op, Box::new(inner)).into_node(span)
         }
         Rule::identifier_call => {
-            let mut children = pair.assert_and_unwrap(Rule::identifier_call);
+            let mut children = pair.assert_and_unwrap_children(Rule::identifier_call);
             let target = children.next().unwrap();
             let target_span = target.as_span();
             let identifier = parse_identifier(target);
@@ -148,7 +152,7 @@ fn parse_primary_expr(pair: Pair<Rule>) -> Node<Expression> {
             Expression::Call(Box::new(identifier_node), args).into_node(span)
         }
         Rule::vector_literal => {
-            let mut children = pair.assert_and_unwrap(Rule::vector_literal);
+            let mut children = pair.assert_and_unwrap_children(Rule::vector_literal);
             let x = children.next().unwrap().as_str().parse().unwrap();
             let y = children.next().unwrap().as_str().parse().unwrap();
             let z = children.next().unwrap().as_str().parse().unwrap();
@@ -161,8 +165,8 @@ fn parse_primary_expr(pair: Pair<Rule>) -> Node<Expression> {
     }
 }
 
-fn parse_unary_expression(pair: Pair<Rule>) -> Node<Expression> {
-    let mut inner = pair.assert_and_unwrap(Rule::unary_expression);
+fn parse_unary_expression(pair: QCPair) -> Node<Expression> {
+    let mut inner = pair.assert_and_unwrap_children(Rule::unary_expression);
 
     let primary = inner.next().unwrap();
     let primary = parse_primary_expr(primary);
@@ -171,7 +175,7 @@ fn parse_unary_expression(pair: Pair<Rule>) -> Node<Expression> {
 
     while let Some(op) = inner.next() {
         let span = op.as_span();
-        let mut pairs = op.assert_and_unwrap(Rule::selector);
+        let mut pairs = op.assert_and_unwrap_children(Rule::selector);
 
         let identifier = pairs.next().unwrap();
         let identifier = parse_identifier(identifier);
@@ -191,9 +195,9 @@ fn parse_unary_expression(pair: Pair<Rule>) -> Node<Expression> {
     expr
 }
 
-fn parse_expression<'a>(pair: Pair<'a, Rule>) -> ExpressionNode<'a> {
+fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
     let span = pair.as_span();
-    let pairs = pair.assert_and_unwrap(Rule::expression);
+    let mut pairs = pair.assert_and_unwrap_children(Rule::expression);
 
     let infix = |lhs: ExpressionNode<'a>, op_pair: Pair<'a, Rule>, rhs: ExpressionNode<'a>| {
         let op = match op_pair.as_rule() {
@@ -223,17 +227,25 @@ fn parse_expression<'a>(pair: Pair<'a, Rule>) -> ExpressionNode<'a> {
         ])
     });
 
-    CLIMBER.climb(pairs, parse_unary_expression, infix)
+    let pairs_iterator = pairs.pest_iterator();
+
+    let expression = CLIMBER.climb(
+        pairs_iterator,
+        |pair| parse_unary_expression(QCPair::new(pair)),
+        infix,
+    );
+
+    expression
 }
 
-fn parse_statement(pair: Pair<Rule>) -> Node<Statement> {
+fn parse_statement(pair: QCPair) -> Node<Statement> {
     let span = pair.as_span();
-    let mut inner = pair.assert_and_unwrap(Rule::statement);
+    let mut inner = pair.assert_and_unwrap_children(Rule::statement);
 
     let statement_pair = inner.next().unwrap();
     let statement = match statement_pair.as_rule() {
         Rule::assignment => {
-            let mut inner = statement_pair.into_inner();
+            let mut inner = statement_pair.children();
             let left = inner.next().unwrap();
             let left = parse_expression(left);
             let right = inner.next().unwrap();
@@ -245,8 +257,11 @@ fn parse_statement(pair: Pair<Rule>) -> Node<Statement> {
         }
         Rule::declaration => Statement::Decl(parse_declaration(statement_pair)),
         Rule::expression_statement => {
-            let inner = statement_pair.into_inner().next().unwrap();
-            Statement::Expression(parse_expression(inner))
+            let mut inner = statement_pair.children();
+            let expr_pair = inner.next().unwrap();
+            let expr = Statement::Expression(parse_expression(expr_pair));
+            inner.next().unwrap().assert_rule(Rule::end_of_statement);
+            expr
         }
         Rule::newline => Statement::Newline,
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
@@ -258,16 +273,17 @@ fn parse_statement(pair: Pair<Rule>) -> Node<Statement> {
         None => node,
         Some(end_comment) => {
             let comment = end_comment
-                .assert_and_unwrap_only_child(Rule::comment_after)
+                .assert_and_unwrap_children(Rule::comment_after)
+                .only_child()
                 .as_str();
             node.with_comment_after(comment)
         }
     }
 }
 
-fn parse_block(pair: Pair<Rule>) -> Node<Block> {
+fn parse_block(pair: QCPair) -> Node<Block> {
     let span = pair.as_span();
-    let inner = pair.assert_and_unwrap(Rule::block);
+    let inner = pair.assert_and_unwrap_children(Rule::block);
     let mut statements = Vec::new();
 
     for statement_or_newline in inner {
@@ -285,12 +301,16 @@ fn parse_block(pair: Pair<Rule>) -> Node<Block> {
     Block(statements).into_node(span)
 }
 
-fn parse_binding(pair: Pair<Rule>) -> Declaration {
-    fn parse_initializer(pair: Pair<Rule>) -> BindingInitializer {
-        let child = pair.assert_and_unwrap_only_child(Rule::initializer);
+fn parse_binding(pair: QCPair) -> Declaration {
+    fn parse_initializer(pair: QCPair) -> BindingInitializer {
+        let child = pair
+            .assert_and_unwrap_children(Rule::initializer)
+            .only_child();
         match child.as_rule() {
             Rule::builtin_reference => {
-                let reference = child.assert_and_unwrap_only_child(Rule::builtin_reference);
+                let reference = child
+                    .assert_and_unwrap_children(Rule::builtin_reference)
+                    .only_child();
                 let reference = reference
                     .as_str()
                     .parse::<u32>()
@@ -309,8 +329,8 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
         }
     }
 
-    fn parse_modifiers(pair: Pair<Rule>) -> Vec<BindingModifier> {
-        pair.assert_and_unwrap(Rule::binding_modifiers)
+    fn parse_modifiers(pair: QCPair) -> Vec<BindingModifier> {
+        pair.assert_and_unwrap_children(Rule::binding_modifiers)
             .map(|pair| match pair.as_rule() {
                 Rule::binding_const => BindingModifier::Const,
                 Rule::binding_var => BindingModifier::Var,
@@ -320,7 +340,7 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
             .collect()
     }
 
-    let mut inner = pair.assert_and_unwrap(Rule::binding);
+    let mut inner = pair.assert_and_unwrap_children(Rule::binding);
 
     let modifiers = inner.next().unwrap();
     let modifiers = parse_modifiers(modifiers);
@@ -340,8 +360,15 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
                 let next = inner.peek().expect("Unexpected end of binding list");
 
                 let initializer = match next.as_rule() {
-                    Rule::initializer => Some(parse_initializer(inner.next().unwrap())),
-                    _ => None,
+                    Rule::initializer => {
+                        inner.next();
+                        Some(parse_initializer(next))
+                    }
+                    Rule::identifier | Rule::end_of_declaration => None,
+                    otherwise => panic!(
+                        "Expected initializer, identifier or end_of_declaration, found {:?}",
+                        otherwise
+                    ),
                 };
 
                 names.push(BoundName { name, initializer }.into_node(next_span));
@@ -358,21 +385,22 @@ fn parse_binding(pair: Pair<Rule>) -> Declaration {
     }
 }
 
-fn parse_declaration(pair: Pair<Rule>) -> Node<Declaration> {
+fn parse_declaration(pair: QCPair) -> Node<Declaration> {
     let span = pair.as_span();
-    let mut inner = pair.assert_and_unwrap(Rule::declaration);
+    let mut inner = pair.assert_and_unwrap_children(Rule::declaration);
     let declaration_pair = inner.next().unwrap();
 
     let declaration = match declaration_pair.as_rule() {
         Rule::line_comment => {
             let comment_text = declaration_pair
-                .assert_and_unwrap_only_child(Rule::line_comment)
+                .assert_and_unwrap_children(Rule::line_comment)
+                .only_child()
                 .as_str();
             Declaration::Comment(comment_text)
         }
         Rule::newline => Declaration::Newline,
         Rule::field_declaration => {
-            let mut inner = declaration_pair.into_inner();
+            let mut inner = declaration_pair.children();
 
             let ty = inner.next().unwrap();
             let ty = parse_type(ty);
@@ -393,7 +421,8 @@ fn parse_declaration(pair: Pair<Rule>) -> Node<Declaration> {
         None => node,
         Some(end_comment) => {
             let comment = end_comment
-                .assert_and_unwrap_only_child(Rule::comment_after)
+                .assert_and_unwrap_children(Rule::comment_after)
+                .only_child()
                 .as_str();
             node.with_comment_after(comment)
         }
@@ -402,8 +431,12 @@ fn parse_declaration(pair: Pair<Rule>) -> Node<Declaration> {
 
 pub fn parse_program(input: &str) -> Vec<Node<Declaration>> {
     match QuakeCParser::parse(Rule::main, input) {
-        Ok(mut result) => {
-            let program = result.next().unwrap().assert_and_unwrap(Rule::main);
+        Ok(result) => {
+            let mut result = QCPairs::new(result);
+            let program = result
+                .next()
+                .unwrap()
+                .assert_and_unwrap_children(Rule::main);
             let mut declarations = Vec::new();
 
             for declaration_or_newline in program {

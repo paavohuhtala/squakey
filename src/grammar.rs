@@ -32,7 +32,12 @@ where
 
         match unwrapped.next() {
             Some(next) => {
-                panic!("Expected exactly one child, found {:?}", next.as_rule());
+                panic!(
+                    "Expected exactly one child ({:?}), found {:?} in {:?}",
+                    rule,
+                    next.as_rule(),
+                    next,
+                );
             }
             None => first,
         }

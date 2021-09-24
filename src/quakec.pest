@@ -6,7 +6,7 @@
 //  https://github.com/pointlander/peg/blob/0d618c19cd3c991caccb57451d418b16a6ea2595/grammars/java/java_1_7.peg
 
 WHITESPACE = _{ " " | "\t" | silent_newline }
-COMMENT = _{ ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!newline ~ ANY)* ~ silent_newline) }
+COMMENT = { ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!newline ~ ANY)* ~ silent_newline) }
 
 space = _{ " " | "\t" }
 silent_newline = _{ "\r\n" | "\n" }
