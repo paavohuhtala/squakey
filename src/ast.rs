@@ -40,6 +40,10 @@ pub enum InfixOp {
     BitwiseXor,
     Equals,
     NotEquals,
+    LessThan,
+    LessThanOrEquals,
+    GreaterThan,
+    GreaterThanOrEquals,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -53,12 +57,16 @@ impl InfixOp {
     // https://en.cppreference.com/w/c/language/operator_precedence
     pub fn precedence(self) -> i32 {
         match self {
-            InfixOp::Or => -5,
-            InfixOp::And => -4,
-            InfixOp::BitwiseOr => -3,
-            InfixOp::BitwiseXor => -2,
-            InfixOp::BitwiseAnd => -1,
-            InfixOp::Equals | InfixOp::NotEquals => 0,
+            InfixOp::Or => -6,
+            InfixOp::And => -5,
+            InfixOp::BitwiseOr => -4,
+            InfixOp::BitwiseXor => -3,
+            InfixOp::BitwiseAnd => -2,
+            InfixOp::Equals | InfixOp::NotEquals => -1,
+            InfixOp::LessThan
+            | InfixOp::LessThanOrEquals
+            | InfixOp::GreaterThan
+            | InfixOp::GreaterThanOrEquals => 0,
             InfixOp::Add | InfixOp::Sub => 1,
             InfixOp::Mul | InfixOp::Div => 2,
         }
@@ -90,6 +98,19 @@ pub enum Expression<'a> {
     Prefix(PrefixOp, Box<ExpressionNode<'a>>),
     Call(Box<ExpressionNode<'a>>, Vec<ExpressionNode<'a>>),
     FieldAccess(Box<ExpressionNode<'a>>, &'a str),
+    FrameReference(&'a str),
+}
+
+#[derive(Debug)]
+pub enum IfCondition<'a> {
+    IfTrue(ExpressionNode<'a>),
+    IfFalse(ExpressionNode<'a>),
+}
+
+#[derive(Debug)]
+pub struct IfCase<'a> {
+    pub condition: Node<'a, IfCondition<'a>>,
+    pub body: Node<'a, Block<'a>>,
 }
 
 #[derive(Debug)]
@@ -102,6 +123,12 @@ pub enum Statement<'a> {
         rvalue: ExpressionNode<'a>,
     },
     Decl(Node<'a, Declaration<'a>>),
+    If {
+        case: Node<'a, IfCase<'a>>,
+        else_if: Vec<Node<'a, IfCase<'a>>>,
+        else_body: Option<Node<'a, Block<'a>>>,
+    },
+    Return(Option<ExpressionNode<'a>>),
     Newline,
 }
 
@@ -120,6 +147,11 @@ pub enum BindingInitializer<'a> {
     Expr(ExpressionNode<'a>),
     Block(Node<'a, Block<'a>>),
     BuiltinReference(u32),
+    StateFunction {
+        frame: &'a str,
+        callback: &'a str,
+        body: Node<'a, Block<'a>>,
+    },
 }
 
 #[derive(Debug)]
@@ -142,6 +174,17 @@ pub enum Declaration<'a> {
         names: Vec<Node<'a, BoundName<'a>>>,
     },
 }
+
+#[derive(Debug)]
+pub struct ModelGenCommand<'a>(pub &'a str);
+
+#[derive(Debug)]
+pub enum ProgramPart<'a> {
+    ModelGen(ModelGenCommand<'a>),
+    Declaration(Node<'a, Declaration<'a>>),
+}
+
+pub type Program<'a> = Vec<ProgramPart<'a>>;
 
 #[derive(Debug)]
 pub enum Comment<'a> {
@@ -283,3 +326,5 @@ impl AstNode for Block<'_> {}
 impl AstNode for Type<'_> {}
 impl AstNode for Argument<'_> {}
 impl AstNode for BoundName<'_> {}
+impl AstNode for IfCondition<'_> {}
+impl AstNode for IfCase<'_> {}

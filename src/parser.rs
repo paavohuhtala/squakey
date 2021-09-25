@@ -159,6 +159,14 @@ fn parse_primary_expr(pair: QCPair) -> Node<Expression> {
 
             Expression::Vector(x, y, z).into_node(span)
         }
+        Rule::frame_reference => {
+            let reference = pair
+                .assert_and_unwrap_children(Rule::frame_reference)
+                .only_child()
+                .as_str();
+
+            Expression::FrameReference(reference).into_node(span)
+        }
         otherwise => {
             panic!("expected any primary expression, found {:?}", otherwise);
         }
@@ -212,6 +220,10 @@ fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
             Rule::bitwise_xor => InfixOp::BitwiseXor,
             Rule::equals => InfixOp::Equals,
             Rule::not_equals => InfixOp::NotEquals,
+            Rule::less_than => InfixOp::LessThan,
+            Rule::less_than_or_equals => InfixOp::LessThanOrEquals,
+            Rule::greater_than => InfixOp::GreaterThan,
+            Rule::greater_than_or_equals => InfixOp::GreaterThanOrEquals,
             _ => unreachable!(),
         };
 
@@ -220,10 +232,18 @@ fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
 
     static CLIMBER: Lazy<PrecClimber<Rule>> = Lazy::new(|| {
         PrecClimber::new(vec![
+            Operator::new(Rule::or, Assoc::Left),
+            Operator::new(Rule::and, Assoc::Left),
+            Operator::new(Rule::bitwise_or, Assoc::Left),
+            Operator::new(Rule::bitwise_xor, Assoc::Left),
+            Operator::new(Rule::bitwise_and, Assoc::Left),
+            Operator::new(Rule::equals, Assoc::Left) | Operator::new(Rule::not_equals, Assoc::Left),
+            Operator::new(Rule::less_than, Assoc::Left)
+                | Operator::new(Rule::less_than_or_equals, Assoc::Left),
+            Operator::new(Rule::greater_than, Assoc::Left)
+                | Operator::new(Rule::greater_than_or_equals, Assoc::Left),
             Operator::new(Rule::add, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
             Operator::new(Rule::mul, Assoc::Left) | Operator::new(Rule::div, Assoc::Left),
-            Operator::new(Rule::and, Assoc::Left),
-            Operator::new(Rule::or, Assoc::Left),
         ])
     });
 
@@ -236,6 +256,87 @@ fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
     );
 
     expression
+}
+
+fn parse_if_statement(pair: QCPair) -> Statement {
+    fn parse_if_condition(pair: QCPair) -> Node<IfCondition> {
+        let span = pair.as_span();
+        let mut children = pair.assert_and_unwrap_children(Rule::if_condition);
+
+        let invert_or_condition = children.next().unwrap();
+
+        let (invert, condition) = match invert_or_condition.as_rule() {
+            Rule::if_invert => (true, children.next().unwrap()),
+            _ => (false, invert_or_condition),
+        };
+
+        let condition = parse_expression(condition);
+
+        if invert {
+            IfCondition::IfFalse(condition)
+        } else {
+            IfCondition::IfTrue(condition)
+        }
+        .into_node(span)
+    }
+
+    fn parse_if_body(pair: QCPair) -> Node<Block> {
+        let body = pair.assert_and_unwrap_children(Rule::if_body).only_child();
+
+        match body.as_rule() {
+            Rule::block => parse_block(body),
+            Rule::statement => {
+                let span = body.as_span();
+                let statement = parse_statement(body);
+                Block(vec![statement]).into_node(span)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn parse_if_case(pair: QCPair) -> Node<IfCase> {
+        let span = pair.as_span();
+        let mut children = pair.assert_and_unwrap_children(Rule::if_case);
+
+        let condition = children.next().unwrap();
+        let condition = parse_if_condition(condition);
+
+        let body = children.next().unwrap();
+        let body = parse_if_body(body);
+
+        IfCase { condition, body }.into_node(span)
+    }
+
+    let mut children = pair.assert_and_unwrap_children(Rule::if_statement);
+
+    let case = children.next().unwrap();
+    let case = parse_if_case(case);
+
+    let mut else_if = vec![];
+
+    while let Some(pair) = children.next() {
+        match pair.as_rule() {
+            Rule::if_case => {
+                let case = parse_if_case(pair);
+                else_if.push(case);
+            }
+            Rule::if_body => {
+                let else_body = parse_if_body(pair);
+                return Statement::If {
+                    case,
+                    else_if,
+                    else_body: Some(else_body),
+                };
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    Statement::If {
+        case,
+        else_if,
+        else_body: None,
+    }
 }
 
 fn parse_statement(pair: QCPair) -> Node<Statement> {
@@ -269,6 +370,20 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
             let expr = Statement::Expression(parse_expression(expr_pair));
             inner.next().unwrap().assert_rule(Rule::end_of_statement);
             expr
+        }
+        Rule::if_statement => parse_if_statement(statement_pair),
+        Rule::return_statement => {
+            let mut inner = statement_pair.children();
+            let expr_pair = inner.next().unwrap();
+
+            match expr_pair.as_rule() {
+                Rule::end_of_statement => Statement::Return(None),
+                Rule::expression => {
+                    let expr = parse_expression(expr_pair);
+                    Statement::Return(Some(expr))
+                }
+                _ => unreachable!(),
+            }
         }
         Rule::newline => Statement::Newline,
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
@@ -324,6 +439,20 @@ fn parse_binding(pair: QCPair) -> Declaration {
             Rule::expression => {
                 let value = parse_expression(child);
                 BindingInitializer::Expr(value)
+            }
+            Rule::state_function => {
+                let mut inner = child.assert_and_unwrap_children(Rule::state_function);
+
+                let frame = inner.next().unwrap().as_str();
+                let callback = inner.next().unwrap().as_str();
+                let body = inner.next().unwrap();
+                let body = parse_block(body);
+
+                BindingInitializer::StateFunction {
+                    frame,
+                    callback,
+                    body,
+                }
             }
             otherwise => panic!("unexpected rule {:?}", otherwise),
         }
@@ -432,7 +561,7 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
     node.with_comments_after(inner.comments())
 }
 
-pub fn parse_program(input: &str) -> Vec<Node<Declaration>> {
+pub fn parse_program(input: &str) -> Program {
     match QuakeCParser::parse(Rule::main, input) {
         Ok(result) => {
             println!("{:#?}", result);
@@ -442,25 +571,37 @@ pub fn parse_program(input: &str) -> Vec<Node<Declaration>> {
                 .next()
                 .unwrap()
                 .assert_and_unwrap_children(Rule::main);
-            let mut declarations = Vec::new();
+            let mut parts = Vec::new();
 
-            for declaration_or_newline in program {
-                let span = declaration_or_newline.as_span();
-                let rule = declaration_or_newline.as_rule();
+            for program_part in program {
+                let span = program_part.as_span();
+                let rule = program_part.as_rule();
 
-                if rule == Rule::EOI {
-                    break;
+                match rule {
+                    Rule::EOI => {
+                        break;
+                    }
+                    Rule::newline => {
+                        parts.push(ProgramPart::Declaration(
+                            Declaration::Newline.into_node(span),
+                        ));
+                    }
+                    Rule::modelgen_command => {
+                        let command = program_part
+                            .assert_and_unwrap_children(Rule::modelgen_command)
+                            .next()
+                            .unwrap()
+                            .as_str();
+                        parts.push(ProgramPart::ModelGen(ModelGenCommand(command)));
+                    }
+                    _ => {
+                        let declaration = parse_declaration(program_part);
+                        parts.push(ProgramPart::Declaration(declaration));
+                    }
                 }
-
-                if rule == Rule::newline {
-                    declarations.push(Declaration::Newline.into_node(span));
-                    continue;
-                }
-
-                declarations.push(parse_declaration(declaration_or_newline));
             }
 
-            declarations
+            parts
         }
         Err(error) => {
             println!("{}", error);

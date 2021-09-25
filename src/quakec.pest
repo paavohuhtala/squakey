@@ -10,6 +10,7 @@ silent_newline = _{ "\r\n" | "\n" }
 newline = ${ ("\r\n" | "\n") }
 
 WHITESPACE = _{ " " | "\t" | silent_newline }
+
 line_comment_content = ${ (!newline ~ ANY)* }
 line_comment = ${ "//" ~ line_comment_content ~ (silent_newline | EOI) }
 
@@ -50,7 +51,7 @@ vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" 
 
 // https://github.com/segeljakt/ast/blob/master/examples/calc.pest
 
-infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor }
+infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor | equals | not_equals | less_than | less_than_or_equals | greater_than | greater_than_or_equals }
 add = { "+" }
 sub = { "-" }
 mul = { "*" }
@@ -62,6 +63,10 @@ bitwise_or = { "|" }
 bitwise_xor = { "^" }
 equals = { "==" }
 not_equals = { "!=" }
+less_than = { "<" }
+less_than_or_equals = { "<=" }
+greater_than = { ">" }
+greater_than_or_equals = { ">=" }
 
 prefix = _{ neg | not }
 neg = { "-" }
@@ -77,6 +82,8 @@ identifier_call = { identifier ~ call_arguments }
 unary_expression = { primary ~ selector* }
 selector = { "." ~ identifier ~ call_arguments? }
 
+frame_reference = ${ "$" ~ identifier }
+
 primary = _{
   "(" ~ expression ~ ")" |
   string_literal |
@@ -84,6 +91,7 @@ primary = _{
   vector_literal |
   identifier_call |
   identifier |
+  frame_reference |
   prefixed
 }
 
@@ -99,9 +107,9 @@ end_of_statement = @{ ";" ~ newline? }
 
 field_declaration = !{ "." ~ any_type ~ identifier ~ ( "," ~ identifier )* ~ end_of_declaration }
 
-block = ${ "{" ~ silent_newline? ~ (newline | statement)* ~ (WHITESPACE+ | COMMENT)* ~ "}" }
 builtin_reference = ${ "#" ~ integer_literal }
-initializer = { "=" ~ ( builtin_reference | block | expression ) }
+state_function = { "[" ~ frame_reference ~ "," ~ identifier ~ "]" ~ block }
+initializer = { "=" ~ ( builtin_reference | state_function | block | expression ) }
 
 binding_const = { "const" }
 binding_var = { "var" }
@@ -120,9 +128,18 @@ binding = !{
 }
 
 assignment = !{ expression ~ "=" ~ expression ~ end_of_statement }
-
 expression_statement = !{ expression ~ end_of_statement }
-statement = { WHITESPACE* ~ (line_comment | assignment | declaration | expression_statement ) ~ space* ~ COMMENT* }
+return_statement = !{ "return" ~ expression? ~ end_of_statement }
+
+if_body = { (block | statement) ~silent_newline? }
+if_invert = { "!" | "not" }
+if_condition = { if_invert? ~ "(" ~ expression ~ ")" }
+if_case = { "if" ~ if_condition ~ if_body }
+if_statement = !{ if_case ~ ("else" ~ if_case)* ~ ( "else" ~ if_body )? }
+
+statement = { WHITESPACE* ~ (line_comment | if_statement | return_statement | assignment | declaration | expression_statement ) ~ space* ~ COMMENT* }
+
+block = ${ "{" ~ silent_newline? ~ (newline | statement)* ~ (WHITESPACE+ | COMMENT)* ~ "}" }
 
 declaration = ${
   (space* ~ newline) |
@@ -137,5 +154,9 @@ declaration = ${
   )
 }
 
-program = _{ declaration* }
+modelgen_command_name = ${ "cd" | "origin" | "base" | "flags" | "scale" | "skin" | "frame" | "modelname" | "framesave" | "framerestore" | "framevalue" | "flush" }
+modelgen_command_content = ${ "$" ~ modelgen_command_name ~ " " ~ (!newline ~ ANY)* }
+modelgen_command = ${ modelgen_command_content ~ (silent_newline | EOI) }
+
+program = _{ (declaration | modelgen_command)* }
 main = ${ SOI ~ program ~ EOI }

@@ -8,7 +8,7 @@ use crate::{
 struct ProgramWriter {
     buffer: String,
     indent: usize,
-    config: FormatSettings,
+    pub config: FormatSettings,
     consecutive_empty_lines: usize,
 }
 
@@ -194,6 +194,10 @@ fn format_infix<'a>(
         InfixOp::BitwiseXor => " ^ ",
         InfixOp::Equals => " == ",
         InfixOp::NotEquals => " != ",
+        InfixOp::LessThan => " < ",
+        InfixOp::LessThanOrEquals => " <= ",
+        InfixOp::GreaterThan => " > ",
+        InfixOp::GreaterThanOrEquals => " >= ",
     };
 
     writer.write(op_str);
@@ -314,6 +318,9 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
             writer.write(".");
             writer.write(field_name);
         }
+        Expression::FrameReference(frame_name) => {
+            write!(writer, "${}", frame_name).unwrap();
+        }
     }
 }
 
@@ -357,6 +364,25 @@ fn format_statements(writer: &mut ProgramWriter, statements: &[Node<Statement>])
         format_statement(writer, statement, previous);
         previous = Some(statement);
     }
+}
+
+fn format_if_case(writer: &mut ProgramWriter, case: &IfCase) {
+    writer.write("if ");
+
+    match case.condition.inner() {
+        IfCondition::IfTrue(expr) => {
+            writer.write("(");
+            format_expression(writer, expr);
+        }
+        IfCondition::IfFalse(expr) => {
+            writer.write("!(");
+            format_expression(writer, expr);
+        }
+    }
+
+    writer.write(")");
+
+    format_block(writer, &case.body);
 }
 
 fn format_statement(
@@ -418,6 +444,59 @@ fn format_statement(
             };
 
             format_declaration(writer, decl, previous_decl);
+        }
+        Statement::If {
+            case,
+            else_if,
+            else_body,
+        } => {
+            writer.start_line();
+
+            format_if_case(writer, case);
+
+            for else_if_case in else_if {
+                match writer.config.brace {
+                    BraceStyle::EndOfLine => {
+                        writer.write(" else ");
+                    }
+                    BraceStyle::NextLine => {
+                        writer.end_line();
+                        writer.start_line();
+                        writer.write("else ")
+                    }
+                }
+
+                format_if_case(writer, else_if_case);
+            }
+
+            if let Some(else_body) = else_body {
+                match writer.config.brace {
+                    BraceStyle::EndOfLine => {
+                        writer.write(" else");
+                    }
+                    BraceStyle::NextLine => {
+                        writer.end_line();
+                        writer.start_line();
+                        writer.write("else")
+                    }
+                }
+
+                format_block(writer, else_body);
+            }
+
+            writer.end_line();
+        }
+        Statement::Return(expr) => {
+            writer.start_line();
+            writer.write("return");
+
+            if let Some(expr) = expr {
+                writer.write(" ");
+                format_expression(writer, expr);
+            }
+
+            writer.write(";");
+            writer.end_line();
         }
         Statement::Newline => writer.empty_line(),
     }
@@ -519,6 +598,14 @@ fn format_declaration(
                     Some(BindingInitializer::BuiltinReference(id)) => {
                         write!(writer, " = #{}", id).unwrap();
                     }
+                    Some(BindingInitializer::StateFunction {
+                        frame,
+                        callback,
+                        body,
+                    }) => {
+                        write!(writer, " = [{}, {}]", frame, callback).unwrap();
+                        format_block(writer, body);
+                    }
                 }
             }
 
@@ -531,19 +618,25 @@ fn format_declaration(
     }
 }
 
-pub fn format_program(
-    declarations: Vec<Node<Declaration>>,
-    config: Option<FormatSettings>,
-) -> String {
+pub fn format_program(program: Program, config: Option<FormatSettings>) -> String {
     let mut writer = ProgramWriter::new(config);
 
-    println!("{:#?}", declarations);
+    println!("{:#?}", program);
 
     let mut previous = None;
 
-    for declaration in declarations.iter() {
-        format_declaration(&mut writer, declaration, previous);
-        previous = Some(declaration);
+    for part in program.iter() {
+        match part {
+            ProgramPart::Declaration(decl) => {
+                format_declaration(&mut writer, decl, previous);
+                previous = Some(decl);
+            }
+            ProgramPart::ModelGen(ModelGenCommand(cmd)) => {
+                writer.start_line();
+                writer.write(cmd);
+                writer.end_line();
+            }
+        }
     }
 
     writer.buffer
