@@ -94,6 +94,7 @@ pub enum Expression<'a> {
 
 #[derive(Debug)]
 pub enum Statement<'a> {
+    Comment(Comment<'a>),
     Block(Node<'a, Block<'a>>),
     Expression(ExpressionNode<'a>),
     Assignment {
@@ -130,7 +131,7 @@ pub struct BoundName<'a> {
 #[derive(Debug)]
 pub enum Declaration<'a> {
     Newline,
-    Comment(&'a str),
+    Comment(Comment<'a>),
     Field {
         name: &'a str,
         ty: Node<'a, Type<'a>>,
@@ -143,14 +144,34 @@ pub enum Declaration<'a> {
 }
 
 #[derive(Debug)]
+pub enum Comment<'a> {
+    Line(&'a str),
+    Block(&'a str),
+}
+
+#[derive(Debug)]
+pub struct NodeComments<'a> {
+    pub before: Vec<Comment<'a>>,
+    pub after: Vec<Comment<'a>>,
+}
+
+impl<'a> NodeComments<'a> {
+    pub fn new() -> Self {
+        NodeComments {
+            before: Vec::new(),
+            after: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Node<'a, T>
 where
     T: 'a,
 {
     value: T,
     span: Option<Span<'a>>,
-    pub comment_before: Option<&'a str>,
-    pub comment_after: Option<&'a str>,
+    comments: Option<Box<NodeComments<'a>>>,
 }
 
 impl<'a, T> Node<'a, T>
@@ -161,8 +182,7 @@ where
         Node {
             value,
             span: None,
-            comment_before: None,
-            comment_after: None,
+            comments: None,
         }
     }
 
@@ -175,14 +195,58 @@ where
         self
     }
 
-    pub fn with_comment_before(mut self, comment: &'a str) -> Self {
-        self.comment_before = Some(comment);
+    pub fn with_comments_before(mut self, mut other: Vec<Comment<'a>>) -> Self {
+        if other.len() == 0 {
+            return self;
+        }
+
+        let mut comments = self
+            .comments
+            .unwrap_or_else(|| Box::new(NodeComments::new()));
+
+        comments.before.append(&mut other);
+        self.comments = Some(comments);
         self
     }
 
-    pub fn with_comment_after(mut self, comment: &'a str) -> Self {
-        self.comment_after = Some(comment);
+    pub fn with_comments_after(mut self, mut other: Vec<Comment<'a>>) -> Self {
+        if other.len() == 0 {
+            return self;
+        }
+
+        let mut comments = self
+            .comments
+            .unwrap_or_else(|| Box::new(NodeComments::new()));
+
+        comments.after.append(&mut other);
+        self.comments = Some(comments);
         self
+    }
+
+    pub fn comments_after(&self) -> Option<&[Comment<'a>]> {
+        match &self.comments {
+            Some(comments) => {
+                if comments.after.len() == 0 {
+                    None
+                } else {
+                    Some(comments.after.as_slice())
+                }
+            }
+            None => None,
+        }
+    }
+
+    pub fn comments_before(&self) -> Option<&[Comment<'a>]> {
+        match &self.comments {
+            Some(comments) => {
+                if comments.before.len() == 0 {
+                    None
+                } else {
+                    Some(comments.before.as_slice())
+                }
+            }
+            None => None,
+        }
     }
 }
 

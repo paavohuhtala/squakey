@@ -6,7 +6,14 @@
 //  https://github.com/pointlander/peg/blob/0d618c19cd3c991caccb57451d418b16a6ea2595/grammars/java/java_1_7.peg
 
 WHITESPACE = _{ " " | "\t" | silent_newline }
-COMMENT = { ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!newline ~ ANY)* ~ silent_newline) }
+
+line_comment_content = ${ (!newline ~ ANY)* }
+line_comment = ${ "//" ~ line_comment_content ~ silent_newline }
+
+block_comment_content = ${ (!"*/" ~ ANY)* }
+block_comment = ${"/*" ~ block_comment_content ~ "*/"}
+
+COMMENT = { block_comment | line_comment }
 
 space = _{ " " | "\t" }
 silent_newline = _{ "\r\n" | "\n" }
@@ -93,7 +100,7 @@ end_of_statement = @{ ";" ~ newline? }
 
 field_declaration = !{ "." ~ any_type ~ identifier ~ ( "," ~ identifier )* ~ end_of_declaration }
 
-block = ${ "{" ~ silent_newline? ~ (newline | statement)* ~ WHITESPACE* ~ "}" }
+block = ${ "{" ~ silent_newline? ~ (newline | statement)* ~ (WHITESPACE+ | COMMENT)* ~ "}" }
 builtin_reference = ${ "#" ~ integer_literal }
 initializer = { "=" ~ ( builtin_reference | block | expression ) }
 
@@ -115,12 +122,8 @@ binding = !{
 
 assignment = !{ expression ~ "=" ~ expression ~ end_of_statement }
 
-comment_content = ${ (!newline ~ ANY)* }
-line_comment = ${ "//" ~ comment_content ~ silent_newline }
-comment_after = ${ space* ~ "//"  ~ comment_content ~ silent_newline }
-
 expression_statement = !{ expression ~ end_of_statement }
-statement = ${ WHITESPACE* ~ (line_comment | declaration | assignment | expression_statement ) ~ comment_after? }
+statement = { WHITESPACE* ~ (line_comment | assignment | declaration | expression_statement ) }
 
 declaration = ${
   (space* ~ newline) |
@@ -130,7 +133,7 @@ declaration = ${
       field_declaration |
       binding
     ) ~
-    (comment_after | space*)
+    (space* ~ COMMENT?)
 }
 
 program = _{ declaration* }

@@ -244,6 +244,13 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
 
     let statement_pair = inner.next().unwrap();
     let statement = match statement_pair.as_rule() {
+        Rule::line_comment => {
+            let content = statement_pair
+                .assert_and_unwrap_children(Rule::line_comment)
+                .only_child()
+                .as_str();
+            Statement::Comment(Comment::Line(content))
+        }
         Rule::assignment => {
             let mut inner = statement_pair.children();
             let left = inner.next().unwrap();
@@ -269,16 +276,9 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
 
     let node = Node::new(statement).with_span(span);
 
-    match inner.next() {
-        None => node,
-        Some(end_comment) => {
-            let comment = end_comment
-                .assert_and_unwrap_children(Rule::comment_after)
-                .only_child()
-                .as_str();
-            node.with_comment_after(comment)
-        }
-    }
+    inner.consume_to_end();
+
+    node.with_comments_after(inner.comments())
 }
 
 fn parse_block(pair: QCPair) -> Node<Block> {
@@ -392,11 +392,11 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
 
     let declaration = match declaration_pair.as_rule() {
         Rule::line_comment => {
-            let comment_text = declaration_pair
+            let content = declaration_pair
                 .assert_and_unwrap_children(Rule::line_comment)
                 .only_child()
                 .as_str();
-            Declaration::Comment(comment_text)
+            Declaration::Comment(Comment::Line(content))
         }
         Rule::newline => Declaration::Newline,
         Rule::field_declaration => {
@@ -417,16 +417,9 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
 
     let node = Node::new(declaration).with_span(span);
 
-    match inner.next() {
-        None => node,
-        Some(end_comment) => {
-            let comment = end_comment
-                .assert_and_unwrap_children(Rule::comment_after)
-                .only_child()
-                .as_str();
-            node.with_comment_after(comment)
-        }
-    }
+    inner.consume_to_end();
+
+    node.with_comments_after(inner.comments())
 }
 
 pub fn parse_program(input: &str) -> Vec<Node<Declaration>> {

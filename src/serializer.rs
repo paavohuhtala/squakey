@@ -317,15 +317,44 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
     }
 }
 
+fn format_comment(writer: &mut ProgramWriter, comment: &Comment) {
+    match comment {
+        Comment::Line(line) => {
+            writer.write("//");
+
+            let first_char = line.chars().next();
+
+            if let Some(ch) = first_char {
+                if !ch.is_ascii_whitespace() {
+                    writer.write(" ");
+                }
+            }
+
+            writer.write(line);
+        }
+
+        // TODO: Handle multiline comments
+        Comment::Block(block) => {
+            writer.write("/*");
+            writer.write(block);
+            writer.write("*/");
+        }
+    }
+}
+
 fn format_statement(writer: &mut ProgramWriter, statement: &Node<Statement>) {
     let write_comment_after = |writer: &mut ProgramWriter| {
-        if let Some(comment) = &statement.comment_after {
-            writer.write(" // ");
-            writer.write(comment);
+        if let Some(comments) = statement.comments_after() {
+            for comment in comments {
+                format_comment(writer, comment);
+            }
         }
     };
 
     match statement.inner() {
+        Statement::Comment(comment) => {
+            format_comment(writer, comment);
+        }
         Statement::Block(block) => {
             writer.start_block(BlockSpacing::None);
 
@@ -376,9 +405,11 @@ fn format_block(writer: &mut ProgramWriter, block: &Block) {
 
 fn format_declaration(writer: &mut ProgramWriter, decl: &Node<Declaration>) {
     let write_comment_after = |writer: &mut ProgramWriter| {
-        if let Some(comment) = &decl.comment_after {
-            writer.write(" // ");
-            writer.write(comment);
+        if let Some(comments) = decl.comments_after() {
+            for comment in comments {
+                writer.write(" ");
+                format_comment(writer, comment);
+            }
         }
     };
 
@@ -386,13 +417,9 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Node<Declaration>) {
         Declaration::Newline => {
             writer.empty_line();
         }
-        Declaration::Comment(text) => {
+        Declaration::Comment(comment) => {
             writer.start_line();
-            writer.write("// ");
-            writer.write(text);
-
-            write_comment_after(writer);
-
+            format_comment(writer, comment);
             writer.end_line();
         }
         Declaration::Field { name, ty } => {

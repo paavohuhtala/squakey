@@ -3,11 +3,14 @@ use pest::{
     Span,
 };
 
-use crate::grammar::{PairExt, Rule};
+use crate::{
+    ast::Comment,
+    grammar::{PairExt, Rule},
+};
 
 pub struct QCPairs<'a> {
     inner: Pairs<'a, Rule>,
-    comments: Vec<&'a str>,
+    comments: Vec<Comment<'a>>,
 }
 
 impl<'a> QCPairs<'a> {
@@ -22,15 +25,10 @@ impl<'a> QCPairs<'a> {
         let next = self.inner.next();
         match next {
             None => None,
-            Some(pair) => {
-                if pair.as_rule() == Rule::COMMENT {
-                    println!("NEXT Pushed comment {}", pair.as_str());
-                    self.comments.push(pair.as_str());
-                    self.next()
-                } else {
-                    Some(QCPair::new(pair))
-                }
-            }
+            Some(pair) => match self.consume_comment(pair) {
+                Some(pair) => Some(QCPair::new(pair)),
+                None => self.next(),
+            },
         }
     }
 
@@ -38,16 +36,37 @@ impl<'a> QCPairs<'a> {
         let next = self.inner.peek();
         match next {
             None => None,
-            Some(pair) => {
-                if pair.as_rule() == Rule::COMMENT {
-                    println!("PEEK Pushed comment {}", pair.as_str());
-                    self.inner.next();
-                    self.comments.push(pair.as_str());
-                    self.peek()
-                } else {
-                    Some(QCPair::new(pair))
+            Some(pair) => match self.consume_comment(pair) {
+                Some(pair) => Some(QCPair::new(pair)),
+                None => self.next(),
+            },
+        }
+    }
+
+    fn consume_comment(&mut self, pair: Pair<'a, Rule>) -> Option<Pair<'a, Rule>> {
+        match pair.as_rule() {
+            Rule::COMMENT => {
+                let inner = pair.assert_and_unwrap_only_child(Rule::COMMENT);
+
+                match inner.as_rule() {
+                    Rule::line_comment => {
+                        let content = inner
+                            .assert_and_unwrap_only_child(Rule::line_comment)
+                            .as_str();
+                        self.comments.push(Comment::Line(content));
+                        None
+                    }
+                    Rule::block_comment => {
+                        let content = inner
+                            .assert_and_unwrap_only_child(Rule::block_comment)
+                            .as_str();
+                        self.comments.push(Comment::Block(content));
+                        None
+                    }
+                    _ => unreachable!(),
                 }
             }
+            _ => Some(pair),
         }
     }
 
@@ -66,8 +85,12 @@ impl<'a> QCPairs<'a> {
         }
     }
 
-    pub fn comments(self) -> Vec<&'a str> {
-        self.comments
+    pub fn consume_to_end(&mut self) {
+        while let Some(_) = self.next() {}
+    }
+
+    pub fn comments(&mut self) -> Vec<Comment<'a>> {
+        std::mem::replace(&mut self.comments, Vec::new())
     }
 
     pub fn pest_iterator<'b>(&'b mut self) -> QCPairsPestIterator<'b, 'a> {
