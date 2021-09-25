@@ -317,7 +317,7 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
     }
 }
 
-fn format_comment(writer: &mut ProgramWriter, comment: &Comment) {
+fn format_comment(writer: &mut ProgramWriter, comment: &Comment, is_standalone: bool) {
     match comment {
         Comment::Line(line) => {
             writer.write("//");
@@ -334,36 +334,57 @@ fn format_comment(writer: &mut ProgramWriter, comment: &Comment) {
         }
 
         // TODO: Handle multiline comments
-        Comment::Block(block) => {
+        Comment::Block { content, is_inline } => {
             writer.write("/*");
-            writer.write(block);
+
+            // Micro-optimization: do this without allocations (iterate char-by-char)
+            let with_converted_newlines = content.replace("\r\n", "\n");
+            writer.write(&with_converted_newlines);
+
             writer.write("*/");
+
+            if is_standalone && !is_inline {
+                writer.end_line();
+            }
         }
     }
 }
 
-fn format_statement(writer: &mut ProgramWriter, statement: &Node<Statement>) {
+fn format_statements(writer: &mut ProgramWriter, statements: &[Node<Statement>]) {
+    let mut previous = None;
+
+    for statement in statements {
+        format_statement(writer, statement, previous);
+        previous = Some(statement);
+    }
+}
+
+fn format_statement(
+    writer: &mut ProgramWriter,
+    statement: &Node<Statement>,
+    previous: Option<&Node<Statement>>,
+) {
     let write_comment_after = |writer: &mut ProgramWriter| {
+        // TODO: Does this really work with multiline comments?
         if let Some(comments) = statement.comments_after() {
             for comment in comments {
-                format_comment(writer, comment);
+                writer.write(" ");
+                format_comment(writer, comment, false);
             }
         }
     };
 
     match statement.inner() {
-        Statement::Comment(comment) => {
-            format_comment(writer, comment);
+        Statement::Comment(comment @ Comment::Line(_)) => {
+            writer.start_line();
+            format_comment(writer, comment, true);
+            writer.end_line();
+        }
+        Statement::Comment(comment @ Comment::Block { .. }) => {
+            format_comment(writer, comment, true);
         }
         Statement::Block(block) => {
-            writer.start_block(BlockSpacing::None);
-
-            for statement in block.inner().0.iter() {
-                format_statement(writer, statement);
-            }
-
-            writer.end_block();
-            // TODO this is not correct - but the parser can't parse this either
+            format_block(writer, block);
         }
         Statement::Expression(expr) => {
             writer.start_line();
@@ -387,7 +408,16 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Node<Statement>) {
         }
         Statement::Decl(decl) => {
             // format_declaration handles comment formatting
-            format_declaration(writer, decl);
+
+            let previous_decl = match previous {
+                Some(node) => match node.inner() {
+                    Statement::Decl(declaration) => Some(declaration),
+                    _ => None,
+                },
+                _ => None,
+            };
+
+            format_declaration(writer, decl, previous_decl);
         }
         Statement::Newline => writer.empty_line(),
     }
@@ -396,19 +426,21 @@ fn format_statement(writer: &mut ProgramWriter, statement: &Node<Statement>) {
 fn format_block(writer: &mut ProgramWriter, block: &Block) {
     writer.start_block(BlockSpacing::SpaceBeforeOpen);
 
-    for statement in &block.0 {
-        format_statement(writer, statement);
-    }
+    format_statements(writer, block.0.as_slice());
 
     writer.end_block();
 }
 
-fn format_declaration(writer: &mut ProgramWriter, decl: &Node<Declaration>) {
+fn format_declaration(
+    writer: &mut ProgramWriter,
+    decl: &Node<Declaration>,
+    previous: Option<&Node<Declaration>>,
+) {
     let write_comment_after = |writer: &mut ProgramWriter| {
         if let Some(comments) = decl.comments_after() {
             for comment in comments {
                 writer.write(" ");
-                format_comment(writer, comment);
+                format_comment(writer, comment, false);
             }
         }
     };
@@ -417,10 +449,22 @@ fn format_declaration(writer: &mut ProgramWriter, decl: &Node<Declaration>) {
         Declaration::Newline => {
             writer.empty_line();
         }
-        Declaration::Comment(comment) => {
+        Declaration::Comment(comment @ Comment::Line(_)) => {
             writer.start_line();
-            format_comment(writer, comment);
+            format_comment(writer, comment, true);
             writer.end_line();
+        }
+        Declaration::Comment(comment @ Comment::Block { .. }) => {
+            if let Some(node) = previous {
+                match node.inner() {
+                    Declaration::Comment(Comment::Block { is_inline, .. }) if *is_inline => {
+                        writer.write(" ");
+                    }
+                    _ => {}
+                }
+            }
+
+            format_comment(writer, comment, true);
         }
         Declaration::Field { name, ty } => {
             writer.start_line();
@@ -493,10 +537,13 @@ pub fn format_program(
 ) -> String {
     let mut writer = ProgramWriter::new(config);
 
-    println!("{:?}", declarations);
+    println!("{:#?}", declarations);
+
+    let mut previous = None;
 
     for declaration in declarations.iter() {
-        format_declaration(&mut writer, declaration);
+        format_declaration(&mut writer, declaration, previous);
+        previous = Some(declaration);
     }
 
     writer.buffer

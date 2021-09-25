@@ -394,9 +394,19 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
         Rule::line_comment => {
             let content = declaration_pair
                 .assert_and_unwrap_children(Rule::line_comment)
-                .only_child()
+                .next()
+                .unwrap()
                 .as_str();
             Declaration::Comment(Comment::Line(content))
+        }
+        Rule::block_comment => {
+            let mut inner = declaration_pair.assert_and_unwrap_children(Rule::block_comment);
+
+            let content = inner.next().unwrap().as_str();
+
+            let is_inline = inner.next().is_none();
+
+            Declaration::Comment(Comment::Block { content, is_inline })
         }
         Rule::newline => Declaration::Newline,
         Rule::field_declaration => {
@@ -425,6 +435,8 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
 pub fn parse_program(input: &str) -> Vec<Node<Declaration>> {
     match QuakeCParser::parse(Rule::main, input) {
         Ok(result) => {
+            println!("{:#?}", result);
+
             let mut result = QCPairs::new(result);
             let program = result
                 .next()

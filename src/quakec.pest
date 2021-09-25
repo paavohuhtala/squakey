@@ -5,19 +5,18 @@
 // - This Peg grammar for Java 1.7
 //  https://github.com/pointlander/peg/blob/0d618c19cd3c991caccb57451d418b16a6ea2595/grammars/java/java_1_7.peg
 
-WHITESPACE = _{ " " | "\t" | silent_newline }
-
-line_comment_content = ${ (!newline ~ ANY)* }
-line_comment = ${ "//" ~ line_comment_content ~ silent_newline }
-
-block_comment_content = ${ (!"*/" ~ ANY)* }
-block_comment = ${"/*" ~ block_comment_content ~ "*/"}
-
-COMMENT = { block_comment | line_comment }
-
 space = _{ " " | "\t" }
 silent_newline = _{ "\r\n" | "\n" }
 newline = ${ ("\r\n" | "\n") }
+
+WHITESPACE = _{ " " | "\t" | silent_newline }
+line_comment_content = ${ (!newline ~ ANY)* }
+line_comment = ${ "//" ~ line_comment_content ~ (silent_newline | EOI) }
+
+block_comment_content = ${ (!"*/" ~ ANY)* }
+block_comment = ${"/*" ~ block_comment_content ~ "*/" ~ (space*  ~ newline?) }
+
+COMMENT = ${ block_comment | line_comment }
 
 type_entity = { "entity" }
 type_float = { "float" }
@@ -123,17 +122,19 @@ binding = !{
 assignment = !{ expression ~ "=" ~ expression ~ end_of_statement }
 
 expression_statement = !{ expression ~ end_of_statement }
-statement = { WHITESPACE* ~ (line_comment | assignment | declaration | expression_statement ) }
+statement = { WHITESPACE* ~ (line_comment | assignment | declaration | expression_statement ) ~ space* ~ COMMENT* }
 
 declaration = ${
   (space* ~ newline) |
   (space* ~ line_comment) |
-  WHITESPACE* ~
+  (space* ~ block_comment) |
+  (WHITESPACE* ~
     (
       field_declaration |
       binding
     ) ~
     (space* ~ COMMENT?)
+  )
 }
 
 program = _{ declaration* }

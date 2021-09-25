@@ -146,7 +146,7 @@ pub enum Declaration<'a> {
 #[derive(Debug)]
 pub enum Comment<'a> {
     Line(&'a str),
-    Block(&'a str),
+    Block { content: &'a str, is_inline: bool },
 }
 
 #[derive(Debug)]

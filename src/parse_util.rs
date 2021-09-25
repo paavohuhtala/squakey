@@ -51,16 +51,20 @@ impl<'a> QCPairs<'a> {
                 match inner.as_rule() {
                     Rule::line_comment => {
                         let content = inner
-                            .assert_and_unwrap_only_child(Rule::line_comment)
+                            .assert_and_unwrap(Rule::line_comment)
+                            .next()
+                            .unwrap()
                             .as_str();
                         self.comments.push(Comment::Line(content));
                         None
                     }
                     Rule::block_comment => {
-                        let content = inner
-                            .assert_and_unwrap_only_child(Rule::block_comment)
-                            .as_str();
-                        self.comments.push(Comment::Block(content));
+                        let mut inner = inner.assert_and_unwrap(Rule::block_comment);
+
+                        let content = inner.next().unwrap().as_str();
+                        let is_inline = inner.next().is_none();
+
+                        self.comments.push(Comment::Block { content, is_inline });
                         None
                     }
                     _ => unreachable!(),
