@@ -1,14 +1,18 @@
-use std::fmt::{self, Write};
+use std::{
+    fmt::{self, Write},
+    rc::Rc,
+};
 
 use crate::{
     ast::*,
-    config::{BraceStyle, FormatSettings},
+    config::{FormatSettings, IndentStyle},
+    format_utils::StatementStyle,
 };
 
 struct ProgramWriter {
     buffer: String,
     indent: usize,
-    pub config: FormatSettings,
+    pub config: Rc<FormatSettings>,
     consecutive_empty_lines: usize,
 }
 
@@ -19,7 +23,7 @@ enum BlockSpacing {
 }
 
 impl ProgramWriter {
-    pub fn new(config: Option<FormatSettings>) -> ProgramWriter {
+    pub fn new(config: Option<Rc<FormatSettings>>) -> ProgramWriter {
         ProgramWriter {
             buffer: String::new(),
             indent: 0,
@@ -58,8 +62,8 @@ impl ProgramWriter {
     }
 
     pub fn start_block(&mut self, spacing: BlockSpacing) {
-        match self.config.brace {
-            BraceStyle::EndOfLine => {
+        match self.config.indent_style {
+            IndentStyle::EndOfLine => {
                 match spacing {
                     BlockSpacing::None => self.write("{"),
                     BlockSpacing::SpaceBeforeOpen => self.write(" {"),
@@ -67,7 +71,7 @@ impl ProgramWriter {
                 self.end_line();
                 self.indent();
             }
-            BraceStyle::NextLine => {
+            IndentStyle::NextLine => {
                 self.end_line();
                 self.start_line();
                 self.write("{");
@@ -361,12 +365,12 @@ fn format_statements(writer: &mut ProgramWriter, statements: &[Node<Statement>])
     let mut previous = None;
 
     for statement in statements {
-        format_statement(writer, statement, previous);
+        format_statement(writer, statement, previous, StatementStyle::AddNewline);
         previous = Some(statement);
     }
 }
 
-fn format_if_case(writer: &mut ProgramWriter, case: &IfCase) {
+fn format_if_case(writer: &mut ProgramWriter, case: &Node<IfCase>) {
     writer.write("if ");
 
     match case.condition.inner() {
@@ -382,6 +386,14 @@ fn format_if_case(writer: &mut ProgramWriter, case: &IfCase) {
 
     writer.write(")");
 
+    // TODO: This probably doesn't work properly with K&R style
+    if let Some(comments) = case.condition.comments_after() {
+        for comment in comments {
+            writer.write(" ");
+            format_comment(writer, comment, false);
+        }
+    }
+
     format_block(writer, &case.body);
 }
 
@@ -389,7 +401,12 @@ fn format_statement(
     writer: &mut ProgramWriter,
     statement: &Node<Statement>,
     previous: Option<&Node<Statement>>,
+    style: StatementStyle,
 ) {
+    if style == StatementStyle::Inline {
+        assert!(statement.can_inline(), "format_statement called with style = StatementStyle::Inline, but the statement is not inlinable");
+    }
+
     let write_comment_after = |writer: &mut ProgramWriter| {
         // TODO: Does this really work with multiline comments?
         if let Some(comments) = statement.comments_after() {
@@ -400,7 +417,62 @@ fn format_statement(
         }
     };
 
+    // Oh how I wish that impl Trait worked in closures :(
+    let wrap_in_whitespace =
+        |writer: &mut ProgramWriter, inner: Box<dyn FnOnce(&mut ProgramWriter)>| {
+            if style == StatementStyle::AddNewline {
+                writer.start_line();
+            }
+
+            inner(writer);
+            write_comment_after(writer);
+
+            if style == StatementStyle::AddNewline {
+                writer.end_line();
+            }
+        };
+
+    if style == StatementStyle::AddNewline {}
+
     match statement.inner() {
+        // These are the only statements that can be inlined
+        Statement::Expression(expr) => {
+            wrap_in_whitespace(
+                writer,
+                Box::new(|writer| {
+                    format_expression(writer, expr);
+                    writer.write(";");
+                }),
+            );
+        }
+        Statement::Return(expr) => {
+            wrap_in_whitespace(
+                writer,
+                Box::new(|writer| {
+                    writer.write("return");
+
+                    if let Some(expr) = expr {
+                        writer.write(" ");
+                        format_expression(writer, expr);
+                    }
+
+                    writer.write(";");
+                }),
+            );
+        }
+        Statement::Assignment { lvalue, rvalue } => {
+            wrap_in_whitespace(
+                writer,
+                Box::new(|writer| {
+                    format_expression(writer, lvalue);
+                    writer.write(" = ");
+                    format_expression(writer, rvalue);
+                    writer.write(";");
+                }),
+            );
+        }
+
+        // And these ones can not be inlined
         Statement::Comment(comment @ Comment::Line(_)) => {
             writer.start_line();
             format_comment(writer, comment, true);
@@ -411,26 +483,6 @@ fn format_statement(
         }
         Statement::Block(block) => {
             format_block(writer, block);
-        }
-        Statement::Expression(expr) => {
-            writer.start_line();
-            format_expression(writer, expr);
-            writer.write(";");
-
-            write_comment_after(writer);
-
-            writer.end_line();
-        }
-        Statement::Assignment { lvalue, rvalue } => {
-            writer.start_line();
-            format_expression(writer, lvalue);
-            writer.write(" = ");
-            format_expression(writer, rvalue);
-            writer.write(";");
-
-            write_comment_after(writer);
-
-            writer.end_line();
         }
         Statement::Decl(decl) => {
             // format_declaration handles comment formatting
@@ -449,17 +501,18 @@ fn format_statement(
             case,
             else_if,
             else_body,
+            else_keyword,
         } => {
             writer.start_line();
 
             format_if_case(writer, case);
 
             for else_if_case in else_if {
-                match writer.config.brace {
-                    BraceStyle::EndOfLine => {
+                match writer.config.indent_style {
+                    IndentStyle::EndOfLine => {
                         writer.write(" else ");
                     }
-                    BraceStyle::NextLine => {
+                    IndentStyle::NextLine => {
                         writer.end_line();
                         writer.start_line();
                         writer.write("else ")
@@ -470,32 +523,28 @@ fn format_statement(
             }
 
             if let Some(else_body) = else_body {
-                match writer.config.brace {
-                    BraceStyle::EndOfLine => {
+                match writer.config.indent_style {
+                    IndentStyle::EndOfLine => {
                         writer.write(" else");
                     }
-                    BraceStyle::NextLine => {
+                    IndentStyle::NextLine => {
                         writer.end_line();
                         writer.start_line();
                         writer.write("else")
                     }
                 }
 
+                // TODO: K&R
+                if let Some(comments) = else_keyword.as_ref().unwrap().comments_after() {
+                    for comment in comments {
+                        writer.write(" ");
+                        format_comment(writer, comment, false);
+                    }
+                }
+
                 format_block(writer, else_body);
             }
 
-            writer.end_line();
-        }
-        Statement::Return(expr) => {
-            writer.start_line();
-            writer.write("return");
-
-            if let Some(expr) = expr {
-                writer.write(" ");
-                format_expression(writer, expr);
-            }
-
-            writer.write(";");
             writer.end_line();
         }
         Statement::Newline => writer.empty_line(),
@@ -508,6 +557,20 @@ fn format_block(writer: &mut ProgramWriter, block: &Block) {
     format_statements(writer, block.0.as_slice());
 
     writer.end_block();
+}
+
+fn format_inline_block(writer: &mut ProgramWriter, block: &Block) {
+    assert!(
+        block.0.len() == 1,
+        "Inline blocks must have exactly one statement"
+    );
+    let statement = &block.0[0];
+
+    writer.write("{ ");
+
+    format_statement(writer, statement, None, StatementStyle::Inline);
+
+    writer.write(" }");
 }
 
 fn format_declaration(
@@ -604,7 +667,13 @@ fn format_declaration(
                         body,
                     }) => {
                         write!(writer, " = [{}, {}]", frame, callback).unwrap();
-                        format_block(writer, body);
+
+                        if body.inner().0.len() == 1 {
+                            writer.write(" ");
+                            format_inline_block(writer, body);
+                        } else {
+                            format_block(writer, body);
+                        }
                     }
                 }
             }
@@ -618,7 +687,7 @@ fn format_declaration(
     }
 }
 
-pub fn format_program(program: Program, config: Option<FormatSettings>) -> String {
+pub fn format_program(program: Program, config: Option<Rc<FormatSettings>>) -> String {
     let mut writer = ProgramWriter::new(config);
 
     println!("{:#?}", program);

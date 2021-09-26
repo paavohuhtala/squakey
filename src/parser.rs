@@ -278,6 +278,7 @@ fn parse_if_statement(pair: QCPair) -> Statement {
             IfCondition::IfTrue(condition)
         }
         .into_node(span)
+        .with_comments_after(children.comments())
     }
 
     fn parse_if_body(pair: QCPair) -> Node<Block> {
@@ -301,6 +302,9 @@ fn parse_if_statement(pair: QCPair) -> Statement {
         let condition = children.next().unwrap();
         let condition = parse_if_condition(condition);
 
+        children.consume_all_comments();
+        let condition = condition.with_comments_after(children.comments());
+
         let body = children.next().unwrap();
         let body = parse_if_body(body);
 
@@ -321,11 +325,15 @@ fn parse_if_statement(pair: QCPair) -> Statement {
                 else_if.push(case);
             }
             Rule::if_body => {
+                children.consume_all_comments();
+                let else_keyword = Node::new(()).with_comments_after(children.comments());
+
                 let else_body = parse_if_body(pair);
                 return Statement::If {
                     case,
                     else_if,
                     else_body: Some(else_body),
+                    else_keyword: Some(else_keyword),
                 };
             }
             _ => unreachable!(),
@@ -336,6 +344,7 @@ fn parse_if_statement(pair: QCPair) -> Statement {
         case,
         else_if,
         else_body: None,
+        else_keyword: None,
     }
 }
 

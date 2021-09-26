@@ -1,4 +1,4 @@
-pub enum BraceStyle {
+pub enum IndentStyle {
     // K&R
     EndOfLine,
     // Allman
@@ -6,13 +6,13 @@ pub enum BraceStyle {
 }
 
 pub struct FormatSettings {
-    pub brace: BraceStyle,
+    pub indent_style: IndentStyle,
 }
 
 impl Default for FormatSettings {
     fn default() -> Self {
         Self {
-            brace: BraceStyle::NextLine,
+            indent_style: IndentStyle::NextLine,
         }
     }
 }

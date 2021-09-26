@@ -126,6 +126,10 @@ pub enum Statement<'a> {
     If {
         case: Node<'a, IfCase<'a>>,
         else_if: Vec<Node<'a, IfCase<'a>>>,
+
+        // This is only used for attaching comments
+        // TODO: It would be more correct if these two were in a struct
+        else_keyword: Option<Node<'a, ()>>,
         else_body: Option<Node<'a, Block<'a>>>,
     },
     Return(Option<ExpressionNode<'a>>),

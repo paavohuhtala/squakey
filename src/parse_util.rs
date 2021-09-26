@@ -8,42 +8,46 @@ use crate::{
     grammar::{PairExt, Rule},
 };
 
-pub struct QCPairs<'a> {
-    inner: Pairs<'a, Rule>,
-    comments: Vec<Comment<'a>>,
+pub struct QCPairs<'source> {
+    inner: Pairs<'source, Rule>,
+    comments: Vec<Comment<'source>>,
 }
 
-impl<'a> QCPairs<'a> {
-    pub fn new(pairs: Pairs<'a, Rule>) -> Self {
+impl<'source> QCPairs<'source> {
+    pub fn new(pairs: Pairs<'source, Rule>) -> Self {
         QCPairs {
             inner: pairs,
             comments: Vec::new(),
         }
     }
 
-    pub fn next(&mut self) -> Option<QCPair<'a>> {
+    pub fn next(&mut self) -> Option<QCPair<'source>> {
         let next = self.inner.next();
         match next {
             None => None,
-            Some(pair) => match self.consume_comment(pair) {
+            Some(pair) => match self.filter_non_comment(pair) {
                 Some(pair) => Some(QCPair::new(pair)),
                 None => self.next(),
             },
         }
     }
 
-    pub fn peek(&mut self) -> Option<QCPair<'a>> {
+    pub fn peek(&mut self) -> Option<QCPair<'source>> {
         let next = self.inner.peek();
         match next {
             None => None,
-            Some(pair) => match self.consume_comment(pair) {
+            Some(pair) => match self.filter_non_comment(pair) {
                 Some(pair) => Some(QCPair::new(pair)),
-                None => self.next(),
+                None => {
+                    // Consume the comment and try again
+                    self.inner.next();
+                    self.peek()
+                }
             },
         }
     }
 
-    fn consume_comment(&mut self, pair: Pair<'a, Rule>) -> Option<Pair<'a, Rule>> {
+    fn filter_non_comment(&mut self, pair: Pair<'source, Rule>) -> Option<Pair<'source, Rule>> {
         match pair.as_rule() {
             Rule::COMMENT => {
                 let inner = pair.assert_and_unwrap_only_child(Rule::COMMENT);
@@ -74,7 +78,7 @@ impl<'a> QCPairs<'a> {
         }
     }
 
-    pub fn only_child(&mut self) -> QCPair<'a> {
+    pub fn only_child(&mut self) -> QCPair<'source> {
         let next = self.next().expect("Expected exactly one child");
         let after = self.peek();
 
@@ -93,51 +97,55 @@ impl<'a> QCPairs<'a> {
         while let Some(_) = self.next() {}
     }
 
-    pub fn comments(&mut self) -> Vec<Comment<'a>> {
+    pub fn consume_all_comments(&mut self) {
+        self.peek();
+    }
+
+    pub fn comments(&mut self) -> Vec<Comment<'source>> {
         std::mem::replace(&mut self.comments, Vec::new())
     }
 
-    pub fn pest_iterator<'b>(&'b mut self) -> QCPairsPestIterator<'b, 'a> {
+    pub fn pest_iterator<'iter>(&'iter mut self) -> QCPairsPestIterator<'iter, 'source> {
         QCPairsPestIterator { inner: self }
     }
 }
 
-pub struct QCPairsPestIterator<'a, 'b> {
-    inner: &'a mut QCPairs<'b>,
+pub struct QCPairsPestIterator<'iter, 'source> {
+    inner: &'iter mut QCPairs<'source>,
 }
 
-impl<'a, 'b> QCPairsPestIterator<'a, 'b> {
-    pub fn new(inner: &'a mut QCPairs<'b>) -> Self {
+impl<'iter, 'source> QCPairsPestIterator<'iter, 'source> {
+    pub fn new(inner: &'iter mut QCPairs<'source>) -> Self {
         QCPairsPestIterator { inner }
     }
 }
 
-impl<'a, 'b> Iterator for QCPairsPestIterator<'a, 'b> {
-    type Item = Pair<'b, Rule>;
+impl<'iter, 'source> Iterator for QCPairsPestIterator<'iter, 'source> {
+    type Item = Pair<'source, Rule>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|qc_pair| qc_pair.inner)
     }
 }
 
-impl<'a> Iterator for QCPairs<'a> {
-    type Item = QCPair<'a>;
+impl<'source> Iterator for QCPairs<'source> {
+    type Item = QCPair<'source>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next()
     }
 }
 
-pub struct QCPair<'a> {
-    inner: Pair<'a, Rule>,
+pub struct QCPair<'source> {
+    inner: Pair<'source, Rule>,
 }
 
-impl<'a> QCPair<'a> {
-    pub fn new(pair: Pair<'a, Rule>) -> Self {
+impl<'source> QCPair<'source> {
+    pub fn new(pair: Pair<'source, Rule>) -> Self {
         QCPair { inner: pair }
     }
 
-    pub fn children(self) -> QCPairs<'a> {
+    pub fn children(self) -> QCPairs<'source> {
         QCPairs::new(self.inner.into_inner())
     }
 
@@ -145,7 +153,7 @@ impl<'a> QCPair<'a> {
         self.inner.assert_rule(rule);
     }
 
-    pub fn assert_and_unwrap_children(self, rule: Rule) -> QCPairs<'a> {
+    pub fn assert_and_unwrap_children(self, rule: Rule) -> QCPairs<'source> {
         self.assert_rule(rule);
         self.children()
     }
@@ -154,11 +162,11 @@ impl<'a> QCPair<'a> {
         self.inner.as_rule()
     }
 
-    pub fn as_str(&self) -> &'a str {
+    pub fn as_str(&self) -> &'source str {
         self.inner.as_str()
     }
 
-    pub fn as_span(&self) -> Span<'a> {
+    pub fn as_span(&self) -> Span<'source> {
         self.inner.as_span()
     }
 }
