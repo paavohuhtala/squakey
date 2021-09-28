@@ -202,6 +202,7 @@ fn format_infix<'a>(
         InfixOp::LessThanOrEquals => " <= ",
         InfixOp::GreaterThan => " > ",
         InfixOp::GreaterThanOrEquals => " >= ",
+        InfixOp::CrossProduct => " >< ",
     };
 
     writer.write(op_str);
@@ -397,6 +398,31 @@ fn format_if_case(writer: &mut ProgramWriter, case: &Node<IfCase>) {
     format_block(writer, &case.body);
 }
 
+fn format_switch_case_group(writer: &mut ProgramWriter, group: &Node<SwitchCaseGroup>) {
+    for case in &group.cases {
+        writer.start_line();
+
+        match case.inner() {
+            SwitchCase::Case(expr) => {
+                writer.write("case ");
+                format_expression(writer, expr);
+                writer.write(":");
+            }
+            SwitchCase::Default => {
+                writer.write("default:");
+            }
+        }
+
+        writer.end_line();
+    }
+
+    writer.indent();
+
+    format_statements(writer, &group.body);
+
+    writer.dedent();
+}
+
 fn format_statement(
     writer: &mut ProgramWriter,
     statement: &Node<Statement>,
@@ -545,6 +571,35 @@ fn format_statement(
                 format_block(writer, else_body);
             }
 
+            writer.end_line();
+        }
+        Statement::Switch {
+            case_groups,
+            control_expr,
+        } => {
+            writer.start_line();
+
+            writer.write("switch (");
+            format_expression(writer, control_expr);
+            writer.write(")");
+
+            writer.start_block(BlockSpacing::SpaceBeforeOpen);
+
+            for case_group in case_groups {
+                format_switch_case_group(writer, case_group);
+            }
+
+            writer.end_block();
+            writer.end_line();
+        }
+        Statement::Break => {
+            writer.start_line();
+            writer.write("break;");
+            writer.end_line();
+        }
+        Statement::Continue => {
+            writer.start_line();
+            writer.write("continue;");
             writer.end_line();
         }
         Statement::Newline => writer.empty_line(),

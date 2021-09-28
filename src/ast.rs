@@ -1,6 +1,9 @@
 use std::ops::Deref;
 
 use pest::Span;
+use strum::EnumIter;
+
+use crate::grammar::Rule;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinType {
@@ -27,7 +30,7 @@ pub enum Type<'a> {
     Pointer(Box<Node<'a, Type<'a>>>),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, EnumIter)]
 pub enum InfixOp {
     Add,
     Sub,
@@ -44,6 +47,8 @@ pub enum InfixOp {
     LessThanOrEquals,
     GreaterThan,
     GreaterThanOrEquals,
+    // FTEQCC extension (><)
+    CrossProduct,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -57,6 +62,8 @@ impl InfixOp {
     // https://en.cppreference.com/w/c/language/operator_precedence
     pub fn precedence(self) -> i32 {
         match self {
+            // TODO this is definitely wrong
+            InfixOp::CrossProduct => -7,
             InfixOp::Or => -6,
             InfixOp::And => -5,
             InfixOp::BitwiseOr => -4,
@@ -84,6 +91,49 @@ impl InfixOp {
     pub fn is_right_associative(self) -> bool {
         self.is_associative() || !self.is_left_associative()
     }
+
+    pub fn from_rule(rule: Rule) -> Option<InfixOp> {
+        match rule {
+            Rule::add => Some(InfixOp::Add),
+            Rule::sub => Some(InfixOp::Sub),
+            Rule::mul => Some(InfixOp::Mul),
+            Rule::div => Some(InfixOp::Div),
+            Rule::and => Some(InfixOp::And),
+            Rule::or => Some(InfixOp::Or),
+            Rule::bitwise_and => Some(InfixOp::BitwiseAnd),
+            Rule::bitwise_or => Some(InfixOp::BitwiseOr),
+            Rule::bitwise_xor => Some(InfixOp::BitwiseXor),
+            Rule::equals => Some(InfixOp::Equals),
+            Rule::not_equals => Some(InfixOp::NotEquals),
+            Rule::less_than => Some(InfixOp::LessThan),
+            Rule::less_than_or_equals => Some(InfixOp::LessThanOrEquals),
+            Rule::greater_than => Some(InfixOp::GreaterThan),
+            Rule::greater_than_or_equals => Some(InfixOp::GreaterThanOrEquals),
+            Rule::cross_product => Some(InfixOp::CrossProduct),
+            _ => None,
+        }
+    }
+
+    pub fn into_rule(self) -> Rule {
+        match self {
+            InfixOp::Add => Rule::add,
+            InfixOp::Sub => Rule::sub,
+            InfixOp::Mul => Rule::mul,
+            InfixOp::Div => Rule::div,
+            InfixOp::And => Rule::and,
+            InfixOp::Or => Rule::or,
+            InfixOp::BitwiseAnd => Rule::bitwise_and,
+            InfixOp::BitwiseOr => Rule::bitwise_or,
+            InfixOp::BitwiseXor => Rule::bitwise_xor,
+            InfixOp::Equals => Rule::equals,
+            InfixOp::NotEquals => Rule::not_equals,
+            InfixOp::LessThan => Rule::less_than,
+            InfixOp::LessThanOrEquals => Rule::less_than_or_equals,
+            InfixOp::GreaterThan => Rule::greater_than,
+            InfixOp::GreaterThanOrEquals => Rule::greater_than_or_equals,
+            InfixOp::CrossProduct => Rule::cross_product,
+        }
+    }
 }
 
 pub type ExpressionNode<'a> = Node<'a, Expression<'a>>;
@@ -102,6 +152,18 @@ pub enum Expression<'a> {
 }
 
 #[derive(Debug)]
+pub enum SwitchCase<'a> {
+    Default,
+    Case(ExpressionNode<'a>),
+}
+
+#[derive(Debug)]
+pub struct SwitchCaseGroup<'a> {
+    pub cases: Vec<Node<'a, SwitchCase<'a>>>,
+    pub body: Vec<StatementNode<'a>>,
+}
+
+#[derive(Debug)]
 pub enum IfCondition<'a> {
     IfTrue(ExpressionNode<'a>),
     IfFalse(ExpressionNode<'a>),
@@ -112,6 +174,8 @@ pub struct IfCase<'a> {
     pub condition: Node<'a, IfCondition<'a>>,
     pub body: Node<'a, Block<'a>>,
 }
+
+pub type StatementNode<'a> = Node<'a, Statement<'a>>;
 
 #[derive(Debug)]
 pub enum Statement<'a> {
@@ -132,12 +196,18 @@ pub enum Statement<'a> {
         else_keyword: Option<Node<'a, ()>>,
         else_body: Option<Node<'a, Block<'a>>>,
     },
+    Switch {
+        control_expr: ExpressionNode<'a>,
+        case_groups: Vec<Node<'a, SwitchCaseGroup<'a>>>,
+    },
     Return(Option<ExpressionNode<'a>>),
+    Break,
+    Continue,
     Newline,
 }
 
 #[derive(Debug)]
-pub struct Block<'a>(pub Vec<Node<'a, Statement<'a>>>);
+pub struct Block<'a>(pub Vec<StatementNode<'a>>);
 
 #[derive(Debug, Clone, Copy)]
 pub enum BindingModifier {
@@ -332,3 +402,5 @@ impl AstNode for Argument<'_> {}
 impl AstNode for BoundName<'_> {}
 impl AstNode for IfCondition<'_> {}
 impl AstNode for IfCase<'_> {}
+impl AstNode for SwitchCase<'_> {}
+impl AstNode for SwitchCaseGroup<'_> {}

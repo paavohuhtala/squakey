@@ -25,6 +25,9 @@ impl<'a> Node<'a, Statement<'a>> {
             Statement::Comment(_) => false,
             Statement::Decl(_) => false,
             Statement::Newline => false,
+            Statement::Switch { .. } => false,
+            Statement::Break => false,
+            Statement::Continue => false,
         }
     }
 }

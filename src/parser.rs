@@ -1,14 +1,13 @@
 use core::panic;
 
-use pest::{
-    iterators::Pair,
-    prec_climber::{Assoc, Operator, PrecClimber},
-    Parser,
-};
+use pest::{iterators::Pair, prec_climber::PrecClimber, Parser};
 
 use once_cell::{self, sync::Lazy};
 
-use crate::{ast::*, parse_util::QCPairs};
+use crate::{
+    ast::*,
+    parse_util::{get_operator_table, QCPairs},
+};
 use crate::{grammar::*, parse_util::QCPair};
 
 fn parse_builtin_type(pair: QCPair) -> BuiltinType {
@@ -208,43 +207,13 @@ fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
     let mut pairs = pair.assert_and_unwrap_children(Rule::expression);
 
     let infix = |lhs: ExpressionNode<'a>, op_pair: Pair<'a, Rule>, rhs: ExpressionNode<'a>| {
-        let op = match op_pair.as_rule() {
-            Rule::add => InfixOp::Add,
-            Rule::sub => InfixOp::Sub,
-            Rule::mul => InfixOp::Mul,
-            Rule::div => InfixOp::Div,
-            Rule::and => InfixOp::And,
-            Rule::or => InfixOp::Or,
-            Rule::bitwise_and => InfixOp::BitwiseAnd,
-            Rule::bitwise_or => InfixOp::BitwiseOr,
-            Rule::bitwise_xor => InfixOp::BitwiseXor,
-            Rule::equals => InfixOp::Equals,
-            Rule::not_equals => InfixOp::NotEquals,
-            Rule::less_than => InfixOp::LessThan,
-            Rule::less_than_or_equals => InfixOp::LessThanOrEquals,
-            Rule::greater_than => InfixOp::GreaterThan,
-            Rule::greater_than_or_equals => InfixOp::GreaterThanOrEquals,
-            _ => unreachable!(),
-        };
-
+        let op = InfixOp::from_rule(op_pair.as_rule()).unwrap();
         Expression::Infix(op, Box::new((lhs, rhs))).into_node(span.clone())
     };
 
     static CLIMBER: Lazy<PrecClimber<Rule>> = Lazy::new(|| {
-        PrecClimber::new(vec![
-            Operator::new(Rule::or, Assoc::Left),
-            Operator::new(Rule::and, Assoc::Left),
-            Operator::new(Rule::bitwise_or, Assoc::Left),
-            Operator::new(Rule::bitwise_xor, Assoc::Left),
-            Operator::new(Rule::bitwise_and, Assoc::Left),
-            Operator::new(Rule::equals, Assoc::Left) | Operator::new(Rule::not_equals, Assoc::Left),
-            Operator::new(Rule::less_than, Assoc::Left)
-                | Operator::new(Rule::less_than_or_equals, Assoc::Left),
-            Operator::new(Rule::greater_than, Assoc::Left)
-                | Operator::new(Rule::greater_than_or_equals, Assoc::Left),
-            Operator::new(Rule::add, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
-            Operator::new(Rule::mul, Assoc::Left) | Operator::new(Rule::div, Assoc::Left),
-        ])
+        let operator_table = get_operator_table();
+        PrecClimber::new(operator_table)
     });
 
     let pairs_iterator = pairs.pest_iterator();
@@ -256,6 +225,63 @@ fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
     );
 
     expression
+}
+
+fn parse_switch_statement(pair: QCPair) -> Statement {
+    fn parse_case(pair: QCPair) -> Node<SwitchCase> {
+        let span = pair.as_span();
+        let mut children = pair.assert_and_unwrap_children(Rule::switch_case);
+
+        let inner = children.next().unwrap();
+
+        match inner.as_rule() {
+            Rule::expression => {
+                let expression = parse_expression(inner);
+                SwitchCase::Case(expression)
+            }
+            Rule::switch_default_case => SwitchCase::Default,
+            _ => unreachable!(),
+        }
+        .into_node(span)
+    }
+
+    fn parse_case_group(pair: QCPair) -> Node<SwitchCaseGroup> {
+        let span = pair.as_span();
+        let mut pairs = pair.assert_and_unwrap_children(Rule::switch_case_group);
+
+        let mut cases = Vec::new();
+
+        while let Some(case) = pairs.peek() {
+            match case.as_rule() {
+                Rule::switch_case => {
+                    pairs.next();
+                    let case = parse_case(case);
+                    cases.push(case);
+                }
+                _ => break,
+            }
+        }
+
+        let body: Vec<StatementNode> = pairs.map(parse_statement_or_newline).collect();
+
+        SwitchCaseGroup { body, cases }.into_node(span)
+    }
+
+    let mut pairs = pair.assert_and_unwrap_children(Rule::switch_statement);
+
+    let control_expr = pairs.next().unwrap();
+    let control_expr = parse_expression(control_expr);
+
+    let case_groups = pairs
+        // The last pair is switch_statement_end, a hack to ensure proper newline handling
+        .take_while(|pair| pair.as_rule() == Rule::switch_case_group)
+        .map(parse_case_group)
+        .collect();
+
+    Statement::Switch {
+        case_groups,
+        control_expr,
+    }
 }
 
 fn parse_if_statement(pair: QCPair) -> Statement {
@@ -381,6 +407,7 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
             expr
         }
         Rule::if_statement => parse_if_statement(statement_pair),
+        Rule::switch_statement => parse_switch_statement(statement_pair),
         Rule::return_statement => {
             let mut inner = statement_pair.children();
             let expr_pair = inner.next().unwrap();
@@ -394,6 +421,8 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
                 _ => unreachable!(),
             }
         }
+        Rule::break_statement => Statement::Break,
+        Rule::continue_statement => Statement::Continue,
         Rule::newline => Statement::Newline,
         otherwise => panic!("unimplemented rule: {:?}", otherwise),
     };
@@ -405,21 +434,24 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
     node.with_comments_after(inner.comments())
 }
 
+fn parse_statement_or_newline(pair: QCPair) -> Node<Statement> {
+    let span = pair.as_span();
+
+    match pair.as_rule() {
+        Rule::statement => parse_statement(pair),
+        Rule::newline => Statement::Newline.into_node(span),
+        _ => unreachable!(),
+    }
+}
+
 fn parse_block(pair: QCPair) -> Node<Block> {
     let span = pair.as_span();
     let inner = pair.assert_and_unwrap_children(Rule::block);
     let mut statements = Vec::new();
 
     for statement_or_newline in inner {
-        match statement_or_newline.as_rule() {
-            Rule::newline => {
-                statements.push(Statement::Newline.into_node(span.clone()));
-            }
-            Rule::statement => {
-                statements.push(parse_statement(statement_or_newline));
-            }
-            otherwise => panic!("Expected statement or newline, found {:?}", otherwise),
-        };
+        let statement_or_newline = parse_statement_or_newline(statement_or_newline);
+        statements.push(statement_or_newline);
     }
 
     Block(statements).into_node(span)

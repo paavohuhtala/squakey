@@ -1,10 +1,13 @@
+use itertools::Itertools;
 use pest::{
     iterators::{Pair, Pairs},
+    prec_climber::{Assoc, Operator},
     Span,
 };
+use strum::IntoEnumIterator;
 
 use crate::{
-    ast::Comment,
+    ast::{Comment, InfixOp},
     grammar::{PairExt, Rule},
 };
 
@@ -177,4 +180,29 @@ impl std::fmt::Debug for QCPair<'_> {
             .field("inner", &self.inner)
             .finish()
     }
+}
+
+// Generates the list of operators used by PrecClimber
+pub fn get_operator_table() -> Vec<Operator<Rule>> {
+    InfixOp::iter()
+        .map(|op| {
+            let assoc = if op.is_left_associative() {
+                Assoc::Left
+            } else {
+                Assoc::Right
+            };
+            let operator = Operator::new(op.into_rule(), assoc);
+
+            (op.precedence(), operator)
+        })
+        .into_group_map_by(|(precedence, _)| *precedence)
+        .into_iter()
+        .sorted_by_key(|(precedence, _v)| *precedence)
+        .map(|(_, ops)| {
+            ops.into_iter()
+                .map(|(_, op)| op)
+                .fold1(|l, r| l | r)
+                .unwrap()
+        })
+        .collect_vec()
 }
