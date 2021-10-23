@@ -22,6 +22,20 @@ enum BlockSpacing {
     SpaceBeforeOpen,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum CommentStyle {
+    /// The default style is to place the comment on the current line.
+    // Newlines are not automatically inserted.
+    Default,
+    /// Current indentation will be appended before the comment.
+    /// Otherwise same as Default.
+    StartLine,
+    // A newline is inserted after the comment.
+    EndLine,
+    /// Current indentation will be appended after the comment, and the comment will be suffixed with a newline.
+    StartAndEndLine,
+}
+
 impl ProgramWriter {
     pub fn new(config: Option<Rc<FormatSettings>>) -> ProgramWriter {
         ProgramWriter {
@@ -329,7 +343,14 @@ fn format_expression(writer: &mut ProgramWriter, expr: &Expression) {
     }
 }
 
-fn format_comment(writer: &mut ProgramWriter, comment: &Comment, is_standalone: bool) {
+fn format_comment(writer: &mut ProgramWriter, comment: &Comment, style: CommentStyle) {
+    if matches!(
+        style,
+        CommentStyle::StartLine | CommentStyle::StartAndEndLine
+    ) {
+        writer.start_line();
+    }
+
     match comment {
         Comment::Line(line) => {
             writer.write("//");
@@ -343,9 +364,13 @@ fn format_comment(writer: &mut ProgramWriter, comment: &Comment, is_standalone: 
             }
 
             writer.write(line);
+
+            if style == CommentStyle::StartAndEndLine {
+                writer.end_line();
+            }
         }
 
-        // TODO: Handle multiline comments
+        // TODO: Handle multiline comments with indentation?
         Comment::Block { content, is_inline } => {
             writer.write("/*");
 
@@ -355,10 +380,41 @@ fn format_comment(writer: &mut ProgramWriter, comment: &Comment, is_standalone: 
 
             writer.write("*/");
 
-            if is_standalone && !is_inline {
+            if !is_inline && style == CommentStyle::StartAndEndLine {
                 writer.end_line();
             }
         }
+    }
+}
+
+fn format_comments<'a>(
+    writer: &mut ProgramWriter,
+    comments: impl Into<Option<&'a [Comment<'a>]>>,
+    default_style: CommentStyle,
+    space_before_first: bool,
+) {
+    let mut previous: Option<&Comment> = None;
+
+    let comments = comments.into().unwrap_or(&[]);
+
+    for (i, comment) in comments.iter().enumerate() {
+        if i == 0 && space_before_first {
+            writer.write(" ");
+        }
+
+        let style = match (previous, comment) {
+            (Some(Comment::Block { .. }), Comment::Block { .. }) => {
+                writer.write(" ");
+                CommentStyle::Default
+            }
+            (Some(Comment::Block { .. }), Comment::Line(_)) => CommentStyle::StartAndEndLine,
+            (Some(Comment::Line(_)), _) => CommentStyle::StartLine,
+            (None, _) => default_style,
+        };
+
+        format_comment(writer, &comment, style);
+
+        previous = Some(&comment);
     }
 }
 
@@ -388,17 +444,24 @@ fn format_if_case(writer: &mut ProgramWriter, case: &Node<IfCase>) {
     writer.write(")");
 
     // TODO: This probably doesn't work properly with K&R style
-    if let Some(comments) = case.condition.comments_after() {
-        for comment in comments {
-            writer.write(" ");
-            format_comment(writer, comment, false);
-        }
-    }
+    format_comments(
+        writer,
+        case.condition.comments_after(),
+        CommentStyle::Default,
+        true,
+    );
 
     format_block(writer, &case.body);
 }
 
 fn format_switch_case_group(writer: &mut ProgramWriter, group: &Node<SwitchCaseGroup>) {
+    format_comments(
+        writer,
+        group.comments_before(),
+        CommentStyle::StartAndEndLine,
+        false,
+    );
+
     for case in &group.cases {
         writer.start_line();
 
@@ -412,6 +475,8 @@ fn format_switch_case_group(writer: &mut ProgramWriter, group: &Node<SwitchCaseG
                 writer.write("default:");
             }
         }
+
+        format_comments(writer, case.comments_after(), CommentStyle::EndLine, true);
 
         writer.end_line();
     }
@@ -435,12 +500,12 @@ fn format_statement(
 
     let write_comment_after = |writer: &mut ProgramWriter| {
         // TODO: Does this really work with multiline comments?
-        if let Some(comments) = statement.comments_after() {
-            for comment in comments {
-                writer.write(" ");
-                format_comment(writer, comment, false);
-            }
-        }
+        format_comments(
+            writer,
+            statement.comments_after(),
+            CommentStyle::Default,
+            true,
+        );
     };
 
     // Oh how I wish that impl Trait worked in closures :(
@@ -500,12 +565,15 @@ fn format_statement(
 
         // And these ones can not be inlined
         Statement::Comment(comment @ Comment::Line(_)) => {
-            writer.start_line();
-            format_comment(writer, comment, true);
-            writer.end_line();
+            format_comment(writer, comment, CommentStyle::StartAndEndLine);
         }
-        Statement::Comment(comment @ Comment::Block { .. }) => {
-            format_comment(writer, comment, true);
+        Statement::Comment(comment @ Comment::Block { is_inline, .. }) => {
+            let style = if *is_inline {
+                CommentStyle::Default
+            } else {
+                CommentStyle::StartAndEndLine
+            };
+            format_comment(writer, comment, style);
         }
         Statement::Block(block) => {
             format_block(writer, block);
@@ -562,10 +630,7 @@ fn format_statement(
 
                 // TODO: K&R
                 if let Some(comments) = else_keyword.as_ref().unwrap().comments_after() {
-                    for comment in comments {
-                        writer.write(" ");
-                        format_comment(writer, comment, false);
-                    }
+                    format_comments(writer, comments, CommentStyle::Default, true);
                 }
 
                 format_block(writer, else_body);
@@ -637,7 +702,7 @@ fn format_declaration(
         if let Some(comments) = decl.comments_after() {
             for comment in comments {
                 writer.write(" ");
-                format_comment(writer, comment, false);
+                format_comment(writer, comment, CommentStyle::Default);
             }
         }
     };
@@ -647,11 +712,9 @@ fn format_declaration(
             writer.empty_line();
         }
         Declaration::Comment(comment @ Comment::Line(_)) => {
-            writer.start_line();
-            format_comment(writer, comment, true);
-            writer.end_line();
+            format_comment(writer, comment, CommentStyle::StartAndEndLine);
         }
-        Declaration::Comment(comment @ Comment::Block { .. }) => {
+        Declaration::Comment(comment @ Comment::Block { is_inline, .. }) => {
             if let Some(node) = previous {
                 match node.inner() {
                     Declaration::Comment(Comment::Block { is_inline, .. }) if *is_inline => {
@@ -661,7 +724,13 @@ fn format_declaration(
                 }
             }
 
-            format_comment(writer, comment, true);
+            let style = if *is_inline {
+                CommentStyle::Default
+            } else {
+                CommentStyle::StartAndEndLine
+            };
+
+            format_comment(writer, comment, style);
         }
         Declaration::Field { name, ty } => {
             writer.start_line();

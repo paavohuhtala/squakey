@@ -50,6 +50,21 @@ impl<'source> QCPairs<'source> {
         }
     }
 
+    pub fn try_get_next(&mut self, rule: Rule) -> Option<QCPair<'source>> {
+        let next = self.inner.peek();
+
+        match next {
+            None => None,
+            Some(pair) => {
+                if pair.as_rule() == rule {
+                    Some(QCPair::new(self.inner.next().unwrap()))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     fn filter_non_comment(&mut self, pair: Pair<'source, Rule>) -> Option<Pair<'source, Rule>> {
         match pair.as_rule() {
             Rule::COMMENT => {

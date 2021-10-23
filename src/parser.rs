@@ -234,15 +234,19 @@ fn parse_switch_statement(pair: QCPair) -> Statement {
 
         let inner = children.next().unwrap();
 
-        match inner.as_rule() {
+        let case = match inner.as_rule() {
             Rule::expression => {
                 let expression = parse_expression(inner);
                 SwitchCase::Case(expression)
             }
             Rule::switch_default_case => SwitchCase::Default,
             _ => unreachable!(),
-        }
-        .into_node(span)
+        };
+
+        children.consume_to_end();
+
+        case.into_node(span)
+            .with_comments_after(children.comments())
     }
 
     fn parse_case_group(pair: QCPair) -> Node<SwitchCaseGroup> {
@@ -272,11 +276,19 @@ fn parse_switch_statement(pair: QCPair) -> Statement {
     let control_expr = pairs.next().unwrap();
     let control_expr = parse_expression(control_expr);
 
-    let case_groups = pairs
-        // The last pair is switch_statement_end, a hack to ensure proper newline handling
-        .take_while(|pair| pair.as_rule() == Rule::switch_case_group)
-        .map(parse_case_group)
-        .collect();
+    let mut case_groups = Vec::new();
+
+    while let Some(case_group) = pairs.peek() {
+        match case_group.as_rule() {
+            Rule::switch_case_group => {
+                let comments_before = pairs.comments();
+                pairs.next();
+                let case_group = parse_case_group(case_group).with_comments_before(comments_before);
+                case_groups.push(case_group);
+            }
+            _ => break,
+        }
+    }
 
     Statement::Switch {
         case_groups,
