@@ -51,7 +51,7 @@ vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" 
 
 // https://github.com/segeljakt/ast/blob/master/examples/calc.pest
 
-infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor | cross_product | equals | not_equals | less_than | less_than_or_equals | greater_than | greater_than_or_equals }
+infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor | cross_product | equals | not_equals | less_than_or_equals | less_than | greater_than_or_equals | greater_than }
 add = { "+" }
 sub = { "-" }
 mul = { "*" }
