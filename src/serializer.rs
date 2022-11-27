@@ -566,6 +566,9 @@ fn format_statement(
         // And these ones can not be inlined
         Statement::Comment(comment @ Comment::Line(_)) => {
             format_comment(writer, comment, CommentStyle::StartAndEndLine);
+            if let Some(comments) = statement.comments_after() {
+                format_comments(writer, comments, CommentStyle::StartAndEndLine, false);
+            }
         }
         Statement::Comment(comment @ Comment::Block { is_inline, .. }) => {
             let style = if *is_inline {
