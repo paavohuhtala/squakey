@@ -660,6 +660,15 @@ fn format_statement(
             writer.end_block();
             writer.end_line();
         }
+        Statement::While { condition, body } => {
+            writer.start_line();
+            writer.write("while (");
+            format_expression(writer, condition);
+            writer.write(")");
+            format_block(writer, body);
+            writer.end_line();
+            writer.end_line();
+        }
         Statement::Break => {
             writer.start_line();
             writer.write("break;");

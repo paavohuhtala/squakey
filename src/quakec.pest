@@ -153,10 +153,14 @@ if_condition = { if_invert? ~ "(" ~ expression ~ ")" }
 if_case = !{ "if" ~ if_condition ~ if_body }
 if_statement = ${ if_case ~ (WHITESPACE* ~ "else" ~ WHITESPACE* ~ if_case)* ~ (WHITESPACE* ~ "else" ~ (WHITESPACE | COMMENT)* ~ if_body)? }
 
+while_body = _{ (block ~ silent_newline?) | statement }
+while_statement = !{ "while" ~ "(" ~ expression ~ ")" ~ while_body }
+
 statement = {
   WHITESPACE* ~ (
     line_comment |
     if_statement |
+    while_statement |
     switch_statement |
     return_statement |
     break_statement |

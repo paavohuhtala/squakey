@@ -200,6 +200,10 @@ pub enum Statement<'a> {
         control_expr: ExpressionNode<'a>,
         case_groups: Vec<Node<'a, SwitchCaseGroup<'a>>>,
     },
+    While {
+        condition: ExpressionNode<'a>,
+        body: Node<'a, Block<'a>>,
+    },
     Return(Option<ExpressionNode<'a>>),
     Break,
     Continue,
