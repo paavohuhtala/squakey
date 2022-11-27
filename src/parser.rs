@@ -640,8 +640,6 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
 pub fn parse_program(input: &str) -> Program {
     match QuakeCParser::parse(Rule::main, input) {
         Ok(result) => {
-            println!("{:#?}", result);
-
             let mut result = QCPairs::new(result);
             let program = result
                 .next()

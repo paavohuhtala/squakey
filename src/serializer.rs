@@ -826,8 +826,6 @@ fn format_declaration(
 pub fn format_program(program: Program, config: Option<Rc<FormatSettings>>) -> String {
     let mut writer = ProgramWriter::new(config);
 
-    println!("{:#?}", program);
-
     let mut previous = None;
 
     for part in program.iter() {
