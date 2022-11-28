@@ -1,8 +1,8 @@
 #[test]
 fn %NAME%() {
     // TODO fix on unix
-    let input = include_str!(concat!(r#"%PATH%\input.qc"#));
-    let expected_output = include_str!(r#"%PATH%\expected.qc"#);
+    let input = include_str!(concat!(r#"%PATH%/input.qc"#));
+    let expected_output = include_str!(r#"%PATH%/expected.qc"#);
 
     let parsed = parse_program(input);
     let formatted = format_program(parsed, None);

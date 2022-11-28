@@ -51,7 +51,7 @@ vector_literal = { "'" ~ number_literal ~ number_literal ~ number_literal ~ "'" 
 
 // https://github.com/segeljakt/ast/blob/master/examples/calc.pest
 
-infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor | cross_product | equals | not_equals | less_than | less_than_or_equals | greater_than | greater_than_or_equals }
+infix = _{ add | sub | mul | div | and | bitwise_and | or | bitwise_or | bitwise_xor | cross_product | equals | not_equals | less_than_or_equals | less_than | greater_than_or_equals | greater_than }
 add = { "+" }
 sub = { "-" }
 mul = { "*" }
@@ -132,7 +132,8 @@ binding = !{
   end_of_declaration
 }
 
-assignment = !{ expression ~ "=" ~ expression ~ end_of_statement }
+assignment_chain = _{ expression ~ "=" ~ ( assignment_chain | expression ) }
+assignment = !{ assignment_chain ~ end_of_statement }
 expression_statement = !{ expression ~ end_of_statement }
 return_statement = !{ "return" ~ expression? ~ end_of_statement }
 break_statement = !{ "break" ~ end_of_statement }
@@ -153,10 +154,14 @@ if_condition = { if_invert? ~ "(" ~ expression ~ ")" }
 if_case = !{ "if" ~ if_condition ~ if_body }
 if_statement = ${ if_case ~ (WHITESPACE* ~ "else" ~ WHITESPACE* ~ if_case)* ~ (WHITESPACE* ~ "else" ~ (WHITESPACE | COMMENT)* ~ if_body)? }
 
+while_body = _{ (block ~ silent_newline?) | statement }
+while_statement = !{ "while" ~ "(" ~ expression ~ ")" ~ while_body }
+
 statement = {
   WHITESPACE* ~ (
     line_comment |
     if_statement |
+    while_statement |
     switch_statement |
     return_statement |
     break_statement |

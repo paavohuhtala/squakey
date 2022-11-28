@@ -184,7 +184,7 @@ pub enum Statement<'a> {
     Expression(ExpressionNode<'a>),
     Assignment {
         lvalue: ExpressionNode<'a>,
-        rvalue: ExpressionNode<'a>,
+        rvalue: Vec<ExpressionNode<'a>>,
     },
     Decl(Node<'a, Declaration<'a>>),
     If {
@@ -199,6 +199,10 @@ pub enum Statement<'a> {
     Switch {
         control_expr: ExpressionNode<'a>,
         case_groups: Vec<Node<'a, SwitchCaseGroup<'a>>>,
+    },
+    While {
+        condition: ExpressionNode<'a>,
+        body: Node<'a, Block<'a>>,
     },
     Return(Option<ExpressionNode<'a>>),
     Break,

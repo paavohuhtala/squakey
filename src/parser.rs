@@ -227,6 +227,28 @@ fn parse_expression<'a>(pair: QCPair<'a>) -> ExpressionNode<'a> {
     expression
 }
 
+fn parse_while_statement(pair: QCPair) -> Statement {
+    fn parse_while_body(pair: QCPair) -> Node<Block> {
+        let rule = pair.as_rule();
+        match rule {
+            Rule::block => parse_block(pair),
+            Rule::statement => {
+                let span = pair.as_span();
+                let statement = parse_statement(pair);
+                Block(vec![statement]).into_node(span)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let mut children = pair.assert_and_unwrap_children(Rule::while_statement);
+
+    Statement::While {
+        condition: parse_expression(children.next().unwrap()),
+        body: parse_while_body(children.next().unwrap()),
+    }
+}
+
 fn parse_switch_statement(pair: QCPair) -> Statement {
     fn parse_case(pair: QCPair) -> Node<SwitchCase> {
         let span = pair.as_span();
@@ -403,11 +425,15 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
             let mut inner = statement_pair.children();
             let left = inner.next().unwrap();
             let left = parse_expression(left);
-            let right = inner.next().unwrap();
-            let right = parse_expression(right);
+            let mut parts = Vec::new();
+
+            while let Some(rvalue) = inner.try_get_next(Rule::expression) {
+                parts.push(parse_expression(rvalue));
+            }
+
             Statement::Assignment {
                 lvalue: left,
-                rvalue: right,
+                rvalue: parts,
             }
         }
         Rule::declaration => Statement::Decl(parse_declaration(statement_pair)),
@@ -420,6 +446,7 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
         }
         Rule::if_statement => parse_if_statement(statement_pair),
         Rule::switch_statement => parse_switch_statement(statement_pair),
+        Rule::while_statement => parse_while_statement(statement_pair),
         Rule::return_statement => {
             let mut inner = statement_pair.children();
             let expr_pair = inner.next().unwrap();
@@ -617,8 +644,6 @@ fn parse_declaration(pair: QCPair) -> Node<Declaration> {
 pub fn parse_program(input: &str) -> Program {
     match QuakeCParser::parse(Rule::main, input) {
         Ok(result) => {
-            println!("{:#?}", result);
-
             let mut result = QCPairs::new(result);
             let program = result
                 .next()

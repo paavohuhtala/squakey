@@ -556,8 +556,10 @@ fn format_statement(
                 writer,
                 Box::new(|writer| {
                     format_expression(writer, lvalue);
-                    writer.write(" = ");
-                    format_expression(writer, rvalue);
+                    rvalue.iter().for_each(|v| {
+                        writer.write(" = ");
+                        format_expression(writer, v)
+                    });
                     writer.write(";");
                 }),
             );
@@ -566,6 +568,9 @@ fn format_statement(
         // And these ones can not be inlined
         Statement::Comment(comment @ Comment::Line(_)) => {
             format_comment(writer, comment, CommentStyle::StartAndEndLine);
+            if let Some(comments) = statement.comments_after() {
+                format_comments(writer, comments, CommentStyle::StartAndEndLine, false);
+            }
         }
         Statement::Comment(comment @ Comment::Block { is_inline, .. }) => {
             let style = if *is_inline {
@@ -655,6 +660,15 @@ fn format_statement(
             }
 
             writer.end_block();
+            writer.end_line();
+        }
+        Statement::While { condition, body } => {
+            writer.start_line();
+            writer.write("while (");
+            format_expression(writer, condition);
+            writer.write(")");
+            format_block(writer, body);
+            writer.end_line();
             writer.end_line();
         }
         Statement::Break => {
@@ -813,8 +827,6 @@ fn format_declaration(
 
 pub fn format_program(program: Program, config: Option<Rc<FormatSettings>>) -> String {
     let mut writer = ProgramWriter::new(config);
-
-    println!("{:#?}", program);
 
     let mut previous = None;
 
