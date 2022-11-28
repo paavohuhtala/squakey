@@ -184,7 +184,7 @@ pub enum Statement<'a> {
     Expression(ExpressionNode<'a>),
     Assignment {
         lvalue: ExpressionNode<'a>,
-        rvalue: ExpressionNode<'a>,
+        rvalue: Vec<ExpressionNode<'a>>,
     },
     Decl(Node<'a, Declaration<'a>>),
     If {

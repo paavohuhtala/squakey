@@ -132,7 +132,8 @@ binding = !{
   end_of_declaration
 }
 
-assignment = !{ expression ~ "=" ~ expression ~ end_of_statement }
+assignment_chain = _{ expression ~ "=" ~ ( assignment_chain | expression ) }
+assignment = !{ assignment_chain ~ end_of_statement }
 expression_statement = !{ expression ~ end_of_statement }
 return_statement = !{ "return" ~ expression? ~ end_of_statement }
 break_statement = !{ "break" ~ end_of_statement }

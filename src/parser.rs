@@ -425,11 +425,15 @@ fn parse_statement(pair: QCPair) -> Node<Statement> {
             let mut inner = statement_pair.children();
             let left = inner.next().unwrap();
             let left = parse_expression(left);
-            let right = inner.next().unwrap();
-            let right = parse_expression(right);
+            let mut parts = Vec::new();
+
+            while let Some(rvalue) = inner.try_get_next(Rule::expression) {
+                parts.push(parse_expression(rvalue));
+            }
+
             Statement::Assignment {
                 lvalue: left,
-                rvalue: right,
+                rvalue: parts,
             }
         }
         Rule::declaration => Statement::Decl(parse_declaration(statement_pair)),

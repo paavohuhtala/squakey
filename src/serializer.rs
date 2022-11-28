@@ -556,8 +556,10 @@ fn format_statement(
                 writer,
                 Box::new(|writer| {
                     format_expression(writer, lvalue);
-                    writer.write(" = ");
-                    format_expression(writer, rvalue);
+                    rvalue.iter().for_each(|v| {
+                        writer.write(" = ");
+                        format_expression(writer, v)
+                    });
                     writer.write(";");
                 }),
             );
